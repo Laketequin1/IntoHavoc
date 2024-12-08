@@ -32,6 +32,9 @@ GFX_PATH = "gfx/"
 
 GLOBAL_UP = np.array([0, 1, 0], dtype=np.float32)
 
+SKYBOX_COLOR = (12/255, 13/255, 18/255)
+
+
 ### Thread Handling ###
 events = {"exit": threading.Event()}
 locks = {}
@@ -235,7 +238,7 @@ class Light:
 class GraphicsEngine:
     def __init__(self, aspect):
         # Initilize OpenGL
-        gl.glClearColor(*COLOURS.PURPLE, 1)
+        gl.glClearColor(*SKYBOX_COLOR, 1)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
