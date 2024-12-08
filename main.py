@@ -11,26 +11,26 @@ import atexit
 import math
 import sys
 import time
+from PIL import Image
 
+from src import COLOURS
 
 ### Constants ###
 TPS = 60
-FPS_CAP = 60
+FPS_CAP = 60 #TODO
+FOV = 93
 
 SPT = 1 / TPS
 
 EYE_SPEED = 1
+MOUSE_SENSITIVITY = 0.12
+MAX_LOOK_THETA = 89.95 # Must be < 90 degrees
 
 SHADERS_PATH = "shaders/"
 MODELS_PATH = "models/"
+GFX_PATH = "gfx/"
 
-PALETTE = {
-            "peach": np.array([252/255, 226/255, 219/255], dtype = np.float32),
-            "pink": np.array([255/255, 143/255, 177/255], dtype = np.float32),
-            "darkPink": np.array([178/255, 112/255, 162/255], dtype = np.float32),
-            "purple": np.array([122/255, 68/255, 149/255], dtype = np.float32),
-        }
-
+GLOBAL_UP = np.array([0, 1, 0], dtype=np.float32)
 
 ### Thread Handling ###
 events = {"exit": threading.Event()}
@@ -77,51 +77,63 @@ class Mesh:
         # Vertex Buffer Object (vbo) stores raw data (vertex positions, normals, colors, etc)
         self.vbo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ARRAY_BUFFER, self.vbo)
+        gl.glBufferData(gl.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, gl.GL_STATIC_DRAW) # Upload the vertex data to the GPU
 
-        # Upload the vertex data to the GPU
-        gl.glBufferData(gl.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, gl.GL_STATIC_DRAW)
-        
         # Add attribute pointer for position location in buffer so gpu can find vertex data in memory
+        # Location 1 - Postion
         gl.glEnableVertexAttribArray(0)
-        # location, number of floats, format (float), gl.GL_FALSE, stride (total length of vertex, 4 bytes times number of floats), ctypes of starting position in bytes (void pointer expected)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 12, ctypes.c_void_p(0))
+        # Location, number of floats, format (float), gl.GL_FALSE, stride (total length of vertex, 4 bytes times number of floats), ctypes of starting position in bytes (void pointer expected)
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, 32, ctypes.c_void_p(0))
+        
+        # Location 2 - ST
+        gl.glEnableVertexAttribArray(1)
+        # Location, number of floats, format (float), gl.GL_FALSE, stride (total length of vertex, 4 bytes times number of floats), ctypes of starting position in bytes (void pointer expected)
+        gl.glVertexAttribPointer(1, 2, gl.GL_FLOAT, gl.GL_FALSE, 32, ctypes.c_void_p(12))
+        
+        # Location 3 - Normal
+        gl.glEnableVertexAttribArray(2)
+        # Location, number of floats, format (float), gl.GL_FALSE, stride (total length of vertex, 4 bytes times number of floats), ctypes of starting position in bytes (void pointer expected)
+        gl.glVertexAttribPointer(2, 3, gl.GL_FLOAT, gl.GL_FALSE, 32, ctypes.c_void_p(20))
     
     @staticmethod
-    def load_mesh(path):
-        print(f"Loading mesh {path}...")
-        
+    def load_mesh(filepath):
+    
         vertices = []
-        flags = {"v": []}
         
-        lines = safe_file_readlines(path)
-            
-        for line in lines:
-            line.replace("\n", "")
-            
-            first_space = line.find(" ")
-            flag = line[0:first_space]
-            
-            if flag in flags.keys():
-                line = line.replace(flag + " ", "")
-                line = line.split(" ")
-                flags[flag].append([float(x) for x in line])
-            elif flag == "f":
-                line = line.replace(flag + " ", "")
-                line = line.split(" ")
-                
-                face_vertices = []
-                
-                for vertex in line:
-                    l = vertex.split("/")
-                    face_vertices.append(flags["v"][int(l[0]) - 1])
-                triangles_in_face = len(line) - 2
-                vertex_order = []
-                for x in range(triangles_in_face):
-                    vertex_order.extend((0, x + 1, x + 2))
-                for x in vertex_order:
-                    vertices.extend(face_vertices[x])
+        flags = {"v": [], "vt": [], "vn": []}
         
-        print(f"Finished loading mesh {path}!")
+        with open(filepath, 'r') as f:
+            lines = f.readlines()
+            
+            for line in lines:
+                line.replace("\n", "")
+                
+                first_space = line.find(" ")
+                flag = line[0:first_space]
+                
+                if flag in flags.keys():
+                    line = line.replace(flag + " ", "")
+                    line = line.split(" ")
+                    flags[flag].append([float(x) for x in line])
+                elif flag == "f":
+                    line = line.replace(flag + " ", "")
+                    line = line.split(" ")
+                    
+                    face_vertices = []
+                    face_textures = []
+                    face_normals = []
+                    for vertex in line:
+                        l = vertex.split("/")
+                        face_vertices.append(flags["v"][int(l[0]) - 1])
+                        face_textures.append(flags["vt"][int(l[1]) - 1])
+                        face_normals.append(flags["vn"][int(l[2]) - 1])
+                    triangles_in_face = len(line) - 2
+                    vertex_order = []
+                    for x in range(triangles_in_face):
+                        vertex_order.extend((0, x + 1, x + 2))
+                    for x in vertex_order:
+                        vertices.extend((*face_vertices[x], *face_textures[x], *face_normals[x]))
+        
         return vertices
     
     def destroy(self):
@@ -130,18 +142,52 @@ class Mesh:
         gl.glDeleteBuffers(1, (self.vbo, ))
 
 
+class Material:
+    def __init__(self, filepath):
+        # Allocate space where texture will be stored
+        self.texture = gl.glGenTextures(1)
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        
+        # S is horizontal of a texture, T is the vertical of a texture, GL_REPEAT means image will loop if S or T over/under 1. MIN_FILTER is downsizing. MAG_FILTER is enlarging.
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_REPEAT)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_REPEAT)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_NEAREST)
+        gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+        
+        # Load image, then get height, and the images data
+        image = Image.open(filepath).convert("RGBA")
+        image_width, image_height = image.size
+        image_data = image.tobytes("raw", "RGBA")
+        
+        # Get data for image, then generate the mipmap
+        # Texture location, mipmap level, format image is stored as, width, height, border color, input image format, data format, image data
+        gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, image_width, image_height, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, image_data)
+        gl.glGenerateMipmap(gl.GL_TEXTURE_2D)
+        
+    def use(self):
+        # Select active texture 0, then bind texture
+        gl.glActiveTexture(gl.GL_TEXTURE0) # OPTIMIZE LATER MULTIPLE ACTIVE
+        gl.glBindTexture(gl.GL_TEXTURE_2D, self.texture)
+        
+    def destroy(self):
+        # Remove allocated memory
+        gl.glDeleteTextures(1, (self.texture, ))
+
+
 class Object:
-    def __init__(self, mesh_path, base_color, style, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3)):
-        self.base_color = base_color
-        self.style = style
-        self.pos = pos
-        self.rotation = rotation
-        self.scale = scale
+    def __init__(self, mesh_path, material_path, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3), base_color = COLOURS.RED1, outline = False):
+        self.pos = np.array(pos, dtype=np.float32)
+        self.rotation = np.array(rotation, dtype=np.float32)
+        self.scale = np.array(scale, dtype=np.float32)
+        self.base_color = np.array(base_color, dtype=np.float32)
+        self.outline = outline
 
         self.mesh = Mesh(mesh_path)
+        self.material = Material(material_path)
 
     def render(self, model_matrix_handle, color_handle):
         gl.glUniform3fv(color_handle, 1, self.base_color)
+        self.material.use()
         
         model_transform = pyrr.matrix44.create_identity(dtype = np.float32)
 
@@ -165,20 +211,31 @@ class Object:
         
         # Complete transform
         gl.glUniformMatrix4fv(model_matrix_handle, 1, gl.GL_FALSE, model_transform)
-        
         gl.glBindVertexArray(self.mesh.vao)
         
-        # Draw
-        if self.style == 0:
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
+
+        # Draw debug lines
+        if self.outline:
+            gl.glUniform3fv(color_handle, 1, self.base_color)
             gl.glDrawArrays(gl.GL_LINES, 0, self.mesh.vertex_count)
-        elif self.style == 1:
-            gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
+    
+    def destroy(self):
+        self.mesh.destroy()
+        self.material.destroy()
+
+
+class Light:
+    def __init__(self, position, color, strength):
+        self.position = np.array(position, dtype=np.float32)
+        self.color = np.array(color, dtype=np.float32)
+        self.strength = strength
 
 
 class GraphicsEngine:
     def __init__(self, aspect):
         # Initilize OpenGL
-        gl.glClearColor(*PALETTE["purple"], 1)
+        gl.glClearColor(*COLOURS.PURPLE, 1)
         gl.glEnable(gl.GL_DEPTH_TEST)
         gl.glEnable(gl.GL_BLEND)
         gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
@@ -187,15 +244,37 @@ class GraphicsEngine:
         self.shader = self.create_shader(SHADERS_PATH + "default.vert", SHADERS_PATH + "default.frag")
         gl.glUseProgram(self.shader)
 
+        # Initilize texture
+        texture_handle = gl.glGetUniformLocation(self.shader, "imageTexture") # imageTexture
+        gl.glUniform1i(texture_handle, 0) # NEED TO CHANGE FOR EACH OBJECT??!?!?!?!??! (MAYBE)
+
         # Initilize projection
         projection_handle =        gl.glGetUniformLocation(self.shader, "projection")
 
-        projection_transform = pyrr.matrix44.create_perspective_projection(fovy = 93, aspect = aspect, near = 0.1, far = 200, dtype = np.float32)
+        projection_transform = pyrr.matrix44.create_perspective_projection(fovy = FOV, aspect = aspect, near = 0.1, far = 200, dtype = np.float32)
         gl.glUniformMatrix4fv(projection_handle, 1, gl.GL_FALSE, projection_transform)
 
         self.model_matrix_handle = gl.glGetUniformLocation(self.shader, "model")
         self.view_matrix_handle =  gl.glGetUniformLocation(self.shader, "view")
-        self.color_handle =        gl.glGetUniformLocation(self.shader, "object_color")
+        self.color_handle =        gl.glGetUniformLocation(self.shader, "objectColor")
+        self.camera_pos_handle =   gl.glGetUniformLocation(self.shader, "cameraPosition") # cameraPosition
+
+        """
+        self.light_handle = {
+            "position": [
+                gl.glGetUniformLocation(self.shader, f"Lights[{i}].position")
+                for i in range(8)
+                ],
+            "color": [
+                gl.glGetUniformLocation(self.shader, f"Lights[{i}].color")
+                for i in range(8)
+                ],
+            "strength": [
+                gl.glGetUniformLocation(self.shader, f"Lights[{i}].strength")
+                for i in range(8)
+                ]
+        }
+        """
     
     def create_shader(self, vertex_path, fragment_path):
         vertex_src = safe_file_readlines(vertex_path)
@@ -210,16 +289,17 @@ class GraphicsEngine:
     
     def render_graphics(self, scene):
         # Refresh screen
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
-        
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)        
         gl.glUseProgram(self.shader)
         
-        pos = scene.get_pos()
+        player_pos = scene.get_player_pos()
+        player_forwards = scene.get_player_forwards()
+        player_up = scene.get_player_up()
 
         view_transform = pyrr.matrix44.create_look_at(
-            eye = np.array([pos[0], 0, pos[1]], dtype = np.float32),
-            target = np.array([pos[0], 0, 9999], dtype = np.float32),
-            up = np.array([0, 1, 0], dtype = np.float32),
+            eye = np.array(player_pos, dtype = np.float32),
+            target = np.array(player_pos + player_forwards, dtype = np.float32),
+            up = np.array(player_up, dtype = np.float32),
             dtype = np.float32
         )
         
@@ -227,6 +307,18 @@ class GraphicsEngine:
         
         for object in scene.objects.values():
             object.render(self.model_matrix_handle, self.color_handle)
+
+        """
+        for i, light in enumerate(scene.lights):
+            gl.glUniform3fv(self.light_location["position"][i], 1, light.position)
+            gl.glUniform3fv(self.light_location["color"][i], 1, light.color)
+            gl.glUniform1f(self.light_location["strength"][i], light.strength)
+        """
+
+        gl.glUniform3fv(self.camera_pos_handle, 1, player_pos)
+
+    def destroy(self):
+        gl.glDeleteProgram(self.shader)
 
 
 class Window:
@@ -256,16 +348,28 @@ class Window:
 
         self.aspect = self.screen_width // self.screen_height
         
-        self.window = glfw.create_window(self.screen_width, self.screen_height, "Living Tiles", self.monitor, None)
+        self.window = glfw.create_window(self.screen_width, self.screen_height, "IntoHavoc", self.monitor, None)
         if not self.window:
             glfw.terminate()
             raise Exception("GLFW window can't be created")
         
         glfw.make_context_current(self.window)
 
+        glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
+        glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
+
     def init(self, graphics_engine, scene):
         self.graphics_engine = graphics_engine
         self.scene = scene
+
+        #glfw.set_cursor_pos_callback(self.window, self.scene.add_mouse_pos)
+        glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
+        glfw.set_cursor_pos_callback(self.window, self.mouse_move_func)
+    
+    def mouse_move_func(self, _window, _delta_x, _delta_y):
+        x, y = glfw.get_cursor_pos(self.window)
+        self.scene.set_mouse_pos(x, y)
+        glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
 
     def handle_window_events(self) -> None:
         """
@@ -292,6 +396,7 @@ class Window:
         """
         self.running = False
         self.scene.quit()
+        self.graphics_engine.destroy()
         glfw.terminate()
 
     @staticmethod
@@ -305,7 +410,6 @@ class Window:
         Main window loop.
         """
         while self.running:
-            pos = self.scene.get_pos()
             self.render(self.graphics_engine, self.scene)
             self.tick()
             self.check_gl_error()
@@ -313,27 +417,56 @@ class Window:
 
 
 class Scene():
-    def __init__(self, events):
+    def __init__(self, events, window, screen_size):
         self.events = events
-        self.window = None
+        self.window = window
+        self.screen_width, self.screen_height = screen_size
 
         self.lock = threading.Lock()
 
         self.running = True
-        self.pos = np.array([0, 0], dtype=np.float32)
+        self.player_pos = np.array([0, 0, 0], dtype=np.float32)
+        self.player_forward_vector = np.array([0, 0], dtype=np.float32)
+        self.update_player_forwards()
+
+        self.mouse_pos = np.array([self.screen_width, self.screen_height], dtype=np.int16)
 
         # Initilize Objs
         self.objects = {
-            'mountain': Object(MODELS_PATH + "mountains.obj", PALETTE["pink"], 0, np.array([0, -8, 0]), np.array([np.pi / 2, np.pi, 0])),
-            'ship':     Object(MODELS_PATH + "ship.obj", PALETTE["pink"], 1, scale = np.array([0.6, 0.6, 0.6]))
+            'mountain': Object(MODELS_PATH + "mountains.obj", GFX_PATH + "wood.jpeg", [0, -8, 0], [np.pi / 2, np.pi, 0], outline=True),
+            'ship':     Object(MODELS_PATH + "ship.obj", GFX_PATH + "rendering_texture.jpg", scale = [0.6, 0.6, 0.6]),
+            'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0])
+        }
+
+        self.lights = {
         }
 
     def set_window(self, window):
         self.window = window
 
-    def get_pos(self):
+    def get_player_pos(self):
         with self.lock:
-            return self.pos
+            return self.player_pos
+        
+    def get_player_forwards(self):
+        with self.lock:
+            return self.player_forwards
+        
+    def get_player_up(self):
+        with self.lock:
+            return self.player_up
+        
+    def add_mouse_pos(self, delta_x, delta_y):
+        with self.lock:
+            self.mouse_pos += np.array([delta_x, delta_y], dtype=np.int16)
+    
+    def set_mouse_pos(self, x, y):
+        with self.lock:
+            self.mouse_pos = np.array([x, y], dtype=np.int16)
+
+    def get_mouse_pos(self):
+        with self.lock:
+            return self.mouse_pos
 
     def handle_inputs(self):
         # Eye movement
@@ -353,8 +486,40 @@ class Scene():
             move_y /= length
 
         with self.lock:
-            self.pos[0] += (move_x * EYE_SPEED)
-            self.pos[1] += (move_y * EYE_SPEED)
+            self.player_pos[0] += (move_x * EYE_SPEED)
+            self.player_pos[2] += (move_y * EYE_SPEED)
+        
+        self.handle_mouse()
+
+    def handle_mouse(self):
+        x, y = self.get_mouse_pos()
+
+        theta_increment = MOUSE_SENSITIVITY * ((self.screen_width // 2) - x)
+        phi_increment = MOUSE_SENSITIVITY * ((self.screen_height // 2) - y)
+        
+        self.spin(-theta_increment, phi_increment)
+
+    def spin(self, d_theta, d_phi):        
+        self.player_forward_vector[0] += d_theta
+        self.player_forward_vector[0] %= 360
+    
+        self.player_forward_vector[1] = min(MAX_LOOK_THETA, max(-MAX_LOOK_THETA, self.player_forward_vector[1] + d_phi))
+        
+        self.update_player_forwards()
+    
+    def update_player_forwards(self):
+        with self.lock:
+            self.player_forwards = np.array(
+                [
+                    np.cos(np.deg2rad(self.player_forward_vector[0])) * np.cos(np.deg2rad(self.player_forward_vector[1])),
+                    np.sin(np.deg2rad(self.player_forward_vector[1])),
+                    np.sin(np.deg2rad(self.player_forward_vector[0])) * np.cos(np.deg2rad(self.player_forward_vector[1]))
+                ],
+                dtype = np.float32
+            )
+
+            right = np.cross(self.player_forwards, GLOBAL_UP)
+            self.player_up = np.cross(right, self.player_forwards)
 
     def main(self):
         while self.running:
@@ -370,14 +535,17 @@ class Scene():
         with self.lock:
             self.running = False
 
+        for object in self.objects.values():
+            object.destroy()
+
 
 ### Entry point ###
 def main():
     window = Window()
     graphics_engine = GraphicsEngine(window.aspect)
-    scene = Scene(events)
+    scene = Scene(events, window.window, (window.screen_width, window.screen_height))
 
-    scene.set_window(window.window)
+    #scene.set_window(window.window)
     window.init(graphics_engine, scene)
 
     scene_thread = threading.Thread(target=scene.main)
