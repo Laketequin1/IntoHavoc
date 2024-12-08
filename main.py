@@ -26,6 +26,8 @@ EYE_SPEED = 1
 MOUSE_SENSITIVITY = 0.12
 MAX_LOOK_THETA = 89.95 # Must be < 90 degrees
 
+GRAVITY = 0.000981
+
 SHADERS_PATH = "shaders/"
 MODELS_PATH = "models/"
 GFX_PATH = "gfx/"
@@ -429,6 +431,7 @@ class Scene():
 
         self.running = True
         self.player_pos = np.array([0, 0, 0], dtype=np.float32)
+        self.player_acceleration = np.array([0, 0, 0], dtype=np.float32)
         self.player_forward_vector = np.array([0, 0], dtype=np.float32)
         self.update_player_forwards()
 
@@ -458,10 +461,6 @@ class Scene():
     def get_player_up(self):
         with self.lock:
             return self.player_up
-        
-    def add_mouse_pos(self, delta_x, delta_y):
-        with self.lock:
-            self.mouse_pos += np.array([delta_x, delta_y], dtype=np.int16)
     
     def set_mouse_pos(self, x, y):
         with self.lock:
@@ -537,7 +536,8 @@ class Scene():
         elif glfw.get_key(self.window, glfw.KEY_LEFT_CONTROL):
             d_pos[1] = -EYE_SPEED
 
-        self.player_pos += d_pos
+        with self.lock:
+            self.player_pos += d_pos
 
     def handle_mouse(self):
         x, y = self.get_mouse_pos()
@@ -569,12 +569,24 @@ class Scene():
             right = np.cross(self.player_forwards, GLOBAL_UP)
             self.player_up = np.cross(right, self.player_forwards)
 
+    def gravity(self):
+        with self.lock:
+            self.player_acceleration[1] -= GRAVITY
+
+    def move_player(self):
+        with self.lock:
+            self.player_pos += self.player_acceleration
+
     def main(self):
         while self.running:
             start_time = time.perf_counter()
 
+            self.gravity()
+
             self.handle_keys()
             self.handle_mouse()
+
+            self.move_player()
 
             end_time = time.perf_counter()
             remaining_tick_delay = max(SPT - (end_time - start_time), 0)
