@@ -346,7 +346,7 @@ class Window:
         self.screen_width = self.video_mode.size.width
         self.screen_height = self.video_mode.size.height
 
-        self.aspect = self.screen_width // self.screen_height
+        self.aspect = self.screen_width / self.screen_height
         
         self.window = glfw.create_window(self.screen_width, self.screen_height, "IntoHavoc", self.monitor, None)
         if not self.window:
@@ -468,6 +468,7 @@ class Scene():
         with self.lock:
             return self.mouse_pos
 
+    """
     def handle_inputs(self):
         # Eye movement
         move_x, move_y = 0, 0
@@ -490,6 +491,50 @@ class Scene():
             self.player_pos[2] += (move_y * EYE_SPEED)
         
         self.handle_mouse()
+    """
+    
+    def handle_keys(self):
+        combo = 0
+        direction_modifier = 0
+        d_pos = np.zeros(3, dtype=np.float32)
+        
+        # Handle movement (WASD)
+        if glfw.get_key(self.window, glfw.KEY_W): combo += 1
+        if glfw.get_key(self.window, glfw.KEY_D): combo += 2
+        if glfw.get_key(self.window, glfw.KEY_S): combo += 4
+        if glfw.get_key(self.window, glfw.KEY_A): combo += 8
+        
+        # Direction modifier dictionary for common WASD combinations
+        direction_modifiers = {
+            1: 360,   # w
+            3: 45,    # w & a
+            2: 90,    # a
+            7: 90,    # w & a & s
+            6: 135,   # a & s
+            4: 180,   # s
+            14: 180,  # a & s
+            12: 225,  # s & d
+            8: 270,   # d
+            13: 270,  # w & s & d
+            9: 315,   # w & d
+        }
+        
+        # Check for valid combo and assign corresponding direction modifier
+        if combo in direction_modifiers:
+            direction_modifier = direction_modifiers[combo]
+        
+        # Calculate movement based on direction modifier
+        if direction_modifier:
+            d_pos[0] = EYE_SPEED * np.cos(np.deg2rad(self.player_forward_vector[0] + direction_modifier))
+            d_pos[2] = EYE_SPEED * np.sin(np.deg2rad(self.player_forward_vector[0] + direction_modifier))
+        
+        # Handle vertical movement (space = up, ctrl = down)
+        if glfw.get_key(self.window, glfw.KEY_SPACE):
+            d_pos[1] = EYE_SPEED
+        elif glfw.get_key(self.window, glfw.KEY_LEFT_CONTROL):
+            d_pos[1] = -EYE_SPEED
+
+        self.player_pos += d_pos
 
     def handle_mouse(self):
         x, y = self.get_mouse_pos()
@@ -525,7 +570,8 @@ class Scene():
         while self.running:
             start_time = time.perf_counter()
 
-            self.handle_inputs()
+            self.handle_keys()
+            self.handle_mouse()
 
             end_time = time.perf_counter()
             remaining_tick_delay = max(SPT - (end_time - start_time), 0)
