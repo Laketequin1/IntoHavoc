@@ -429,7 +429,7 @@ class Scene():
         self.player_forward_vector = np.array([0, 0], dtype=np.float32)
         self.update_player_forwards()
 
-        self.mouse_pos = np.array([self.screen_width, self.screen_height], dtype=np.int16)
+        self.mouse_pos = np.array([self.screen_width / 2, self.screen_height / 2], dtype=np.int16)
 
         # Initilize Objs
         self.objects = {
