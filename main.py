@@ -17,10 +17,12 @@ from src import COLOURS
 
 ### Constants ###
 TPS = 60
-FPS_CAP = 60 #TODO
+FPS_CAP = 0 # Set to 0 for uncapped FPS
 FOV = 93
 
 SPT = 1 / TPS
+
+GL_ERROR_CHECK_DELAY_SEC = 5
 
 EYE_SPEED = 1
 MOUSE_SENSITIVITY = 0.12
@@ -51,6 +53,40 @@ def exit_handler() -> None:
     glfw.terminate()
 
 atexit.register(exit_handler)
+
+
+### DEBUGGING ###
+class FrameRateMonitor:
+    def __init__(self, name=""):
+        self.frame_times = []
+        self.last_update_time = None
+        self.name = name
+
+        self.total_elapsed = 0
+
+    def print_fps(self):
+        if len(self.frame_times) and self.total_elapsed:
+            fps = len(self.frame_times) / self.total_elapsed
+
+            print(f"[{self.name}] FPS: {round(fps, 3)} LOW: {round(len(self.frame_times) / (max(*self.frame_times, 0.001) * len(self.frame_times)), 3)} HIGH: {round(len(self.frame_times) / (max(min(self.frame_times), 0.001) * len(self.frame_times)), 3)}")
+
+        self.frame_times = []
+        self.total_elapsed = 0
+
+    def run(self):
+        current_time = time.time()
+
+        if self.last_update_time == None:
+            self.last_update_time = current_time
+            return
+
+        elapsed = current_time - self.last_update_time
+        self.last_update_time = current_time
+        self.total_elapsed += elapsed
+        self.frame_times.append(elapsed)
+
+        if self.total_elapsed > 1:
+            self.print_fps()
 
 
 ### Functions ###
@@ -104,7 +140,6 @@ class Mesh:
     def load_mesh(filepath):
     
         vertices = []
-        
         flags = {"v": [], "vt": [], "vn": []}
         
         with open(filepath, 'r') as f:
@@ -127,13 +162,16 @@ class Mesh:
                     face_vertices = []
                     face_textures = []
                     face_normals = []
+                    
                     for vertex in line:
                         l = vertex.split("/")
                         face_vertices.append(flags["v"][int(l[0]) - 1])
                         face_textures.append(flags["vt"][int(l[1]) - 1])
                         face_normals.append(flags["vn"][int(l[2]) - 1])
+
                     triangles_in_face = len(line) - 2
                     vertex_order = []
+
                     for x in range(triangles_in_face):
                         vertex_order.extend((0, x + 1, x + 2))
                     for x in vertex_order:
@@ -189,6 +227,7 @@ class Object:
 
         self.mesh = Mesh(mesh_path)
         self.material = Material(material_path)
+        self.material.use()
 
     def render(self, model_matrix_handle, color_handle):
         gl.glUniform3fv(color_handle, 1, self.base_color)
@@ -294,7 +333,7 @@ class GraphicsEngine:
     
     def render_graphics(self, scene):
         # Refresh screen
-        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)        
+        gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
         gl.glUseProgram(self.shader)
         
         player_pos = scene.get_player_pos()
@@ -336,6 +375,9 @@ class Window:
         self.running = True
         self.pos_offset = np.array([0, 0], dtype=np.float32)
 
+        self.gl_error_check_time = time.perf_counter()
+        self.fps_monitor = FrameRateMonitor("WINDOW")
+
         # Initilize GLFW
         if not glfw.init():
             raise Exception("GLFW can't be initialized")
@@ -357,24 +399,28 @@ class Window:
         if not self.window:
             glfw.terminate()
             raise Exception("GLFW window can't be created")
-        
+
         glfw.make_context_current(self.window)
 
+        # Max FPS (Disable VSYNC)
+        glfw.swap_interval(FPS_CAP)
+
         glfw.set_input_mode(self.window, glfw.CURSOR, glfw.CURSOR_HIDDEN)
+        if glfw.raw_mouse_motion_supported():
+            glfw.set_input_mode(self.window, glfw.RAW_MOUSE_MOTION, glfw.TRUE)
+
         glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
 
     def init(self, graphics_engine, scene):
         self.graphics_engine = graphics_engine
         self.scene = scene
-
-        #glfw.set_cursor_pos_callback(self.window, self.scene.add_mouse_pos)
-        glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
+        
         glfw.set_cursor_pos_callback(self.window, self.mouse_move_func)
     
     def mouse_move_func(self, _window, _delta_x, _delta_y):
-        x, y = glfw.get_cursor_pos(self.window)
-        self.scene.set_mouse_pos(x, y)
-        glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
+        if self.scene.get_should_center_cursor():
+            glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
+            self.scene.set_should_center_cursor(False)
 
     def handle_window_events(self) -> None:
         """
@@ -387,13 +433,15 @@ class Window:
 
     def render(self, graphics_engine: GraphicsEngine, scene):
         graphics_engine.render_graphics(scene)
-        glfw.swap_buffers(self.window)
+        glfw.swap_buffers(self.window) #<---
 
     def tick(self) -> None:
         """
         Tick (manage frame rate).
         """
         glfw.poll_events()
+
+        self.fps_monitor.run()
 
     def close(self) -> None:
         """
@@ -404,11 +452,13 @@ class Window:
         self.graphics_engine.destroy()
         glfw.terminate()
 
-    @staticmethod
-    def check_gl_error():
-        error = gl.glGetError()
-        if error != gl.GL_NO_ERROR:
-            print(f"OpenGL error: {error}")
+    def check_gl_error(self):
+        if time.perf_counter() > self.gl_error_check_time + GL_ERROR_CHECK_DELAY_SEC:
+            error = gl.glGetError()
+            if error != gl.GL_NO_ERROR:
+                print(f"OpenGL error: {error}")
+
+            self.gl_error_check_time = time.perf_counter()
 
     def main(self) -> None:
         """
@@ -436,6 +486,7 @@ class Scene():
         self.update_player_forwards()
 
         self.mouse_pos = np.array([self.screen_width / 2, self.screen_height / 2], dtype=np.int16)
+        self.should_center_cursor = True
 
         # Initilize Objs
         self.objects = {
@@ -446,6 +497,10 @@ class Scene():
 
         self.lights = {
         }
+
+        self.fps_monitor = FrameRateMonitor("SCENE")
+
+        self.debug_count = 0
 
     def set_window(self, window):
         self.window = window
@@ -465,10 +520,22 @@ class Scene():
     def set_mouse_pos(self, x, y):
         with self.lock:
             self.mouse_pos = np.array([x, y], dtype=np.int16)
+            self.debug_count += 1
+
+            if self.debug_count % 100 == 1:
+                print(self.debug_count)
 
     def get_mouse_pos(self):
         with self.lock:
             return self.mouse_pos
+
+    def set_should_center_cursor(self, bool_should_center_cursor):
+        with self.lock:
+            self.should_center_cursor = bool_should_center_cursor
+
+    def get_should_center_cursor(self):
+        with self.lock:
+            return self.should_center_cursor
 
     """
     def handle_inputs(self):
@@ -540,7 +607,8 @@ class Scene():
             self.player_pos += d_pos
 
     def handle_mouse(self):
-        x, y = self.get_mouse_pos()
+        x, y = glfw.get_cursor_pos(self.window)
+        self.set_should_center_cursor(True)
 
         theta_increment = MOUSE_SENSITIVITY * ((self.screen_width // 2) - x)
         phi_increment = MOUSE_SENSITIVITY * ((self.screen_height // 2) - y)
@@ -581,12 +649,14 @@ class Scene():
         while self.running:
             start_time = time.perf_counter()
 
-            self.gravity()
+            #self.gravity()
 
             self.handle_keys()
             self.handle_mouse()
 
             self.move_player()
+
+            self.fps_monitor.run()
 
             end_time = time.perf_counter()
             remaining_tick_delay = max(SPT - (end_time - start_time), 0)
