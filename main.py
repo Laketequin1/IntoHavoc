@@ -417,7 +417,7 @@ class Window:
         
         glfw.set_cursor_pos_callback(self.window, self.mouse_move_func)
     
-    def mouse_move_func(self, _window, _delta_x, _delta_y):
+    def mouse_move_func(self, _window = None, _delta_x = None, _delta_y = None):
         if self.scene.get_should_center_cursor():
             glfw.set_cursor_pos(self.window, self.screen_width // 2, self.screen_height // 2)
             self.scene.set_should_center_cursor(False)
@@ -467,6 +467,7 @@ class Window:
         while self.running:
             self.render(self.graphics_engine, self.scene)
             self.tick()
+            self.mouse_move_func()
             self.check_gl_error()
             self.handle_window_events()
 
@@ -490,17 +491,16 @@ class Scene():
 
         # Initilize Objs
         self.objects = {
-            'mountain': Object(MODELS_PATH + "mountains.obj", GFX_PATH + "wood.jpeg", [0, -8, 0], [np.pi / 2, np.pi, 0], outline=True),
+            'mountain': Object(MODELS_PATH + "mountains.obj", GFX_PATH + "wood.jpeg", [0, -8, 0], [np.pi / 2, np.pi, 0]),
             'ship':     Object(MODELS_PATH + "ship.obj", GFX_PATH + "rendering_texture.jpg", scale = [0.6, 0.6, 0.6]),
-            'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0])
+            'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0]),
+            'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0])
         }
 
         self.lights = {
         }
 
         self.fps_monitor = FrameRateMonitor("SCENE")
-
-        self.debug_count = 0
 
     def set_window(self, window):
         self.window = window
@@ -520,10 +520,6 @@ class Scene():
     def set_mouse_pos(self, x, y):
         with self.lock:
             self.mouse_pos = np.array([x, y], dtype=np.int16)
-            self.debug_count += 1
-
-            if self.debug_count % 100 == 1:
-                print(self.debug_count)
 
     def get_mouse_pos(self):
         with self.lock:
