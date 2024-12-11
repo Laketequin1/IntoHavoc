@@ -19,7 +19,7 @@ from src import COLOURS
 
 ### Constants ###
 TPS = 60
-FPS_CAP = 0 # Set to 0 for uncapped FPS
+FPS_CAP = 1 # Set to 0 for uncapped FPS, 1 for VSYNC, 2+ for CAP
 FOV = 93
 
 SPT = 1 / TPS
@@ -28,16 +28,26 @@ GL_ERROR_CHECK_DELAY_SEC = 5
 
 MAX_LIGHTS = 100
 
-EYE_SPEED = 0.6
 MOUSE_SENSITIVITY = 0.12
 MAX_LOOK_THETA = 89.95 # Must be < 90 degrees
 
-GRAVITY = 0.000981
+PLAYER_ACCELERATION = 1.56 / TPS
+PLAYER_ACCELERATION_SPRINT_MULTIPLIER = 1.88
+JUMP_STRENGTH = 0.42
+GRAVITY = 9.81 / 6 / TPS
+HORIZONTAL_DRAG = 0.8
+VERTICAL_DRAG = 0.998
+DEFAULT_PLAYER_HEIGHT = 3.2
 
 SHADERS_PATH = "shaders/"
 MODELS_PATH = "models/"
 GFX_PATH = "gfx/"
 SCREENSHOTS_PATH = "screenshots/"
+
+FLIGHT_ENABLED = False
+DEBUG = True
+DEBUG_TRANSPARENCY = 0.2
+DEBUG_RECT_MODEL = "debug_rect.obj"
 
 GLOBAL_UP = np.array([0, 1, 0], dtype=np.float32)
 
@@ -223,12 +233,69 @@ class Material:
         gl.glDeleteTextures(1, (self.texture, ))
 
 
+class LockedRectCollider: # Create parent class for future colliders
+    def __init__(self, corner1, corner2, debug = False, debug_color = COLOURS.RED1):
+        # Init vars
+        self.corner1 = corner1
+        self.corner2 = corner2
+        self.debug = debug and DEBUG
+        self.debug_color = np.array([*debug_color, DEBUG_TRANSPARENCY], dtype=np.float32)
+
+        # Calculate rect
+        self.top = max(corner1[1], corner2[1])
+        self.bottom = min(corner1[1], corner2[1])
+
+        self.right = max(corner1[0], corner2[0])
+        self.left = min(corner1[0], corner2[0])
+
+        self.back = max(corner1[2], corner2[2])
+        self.front = min(corner1[2], corner2[2])
+
+        self.pos = [(self.right + self.left) / 2, (self.top + self.bottom) / 2, (self.back + self.front) / 2]
+
+        self.height = abs(self.top - self.bottom) / 2
+        self.width = abs(self.right - self.left) / 2
+        self.depth = abs(self.back - self.front) / 2
+
+        self.scale = [self.width, self.height, self.depth]
+
+        #for x in range(len(self.pos)):
+        #    self.pos[x] -= self.scale[x] / 2
+
+        # Debug
+        if self.debug:
+            self.mesh = Mesh(MODELS_PATH + DEBUG_RECT_MODEL)
+
+    def render(self, model_matrix_handle, color_handle):
+        if self.debug:
+            gl.glUniform4fv(color_handle, 1, self.debug_color)
+            
+            model_transform = pyrr.matrix44.create_identity(dtype = np.float32)
+
+            # Scale
+            model_transform = pyrr.matrix44.multiply(
+                m1 = model_transform,
+                m2 = pyrr.matrix44.create_from_scale(self.scale, dtype = np.float32)
+            )
+
+            # Translate
+            model_transform = pyrr.matrix44.multiply(
+                m1 = model_transform,
+                m2 = pyrr.matrix44.create_from_translation(self.pos, dtype = np.float32)
+            )
+            
+            # Complete transform
+            gl.glUniformMatrix4fv(model_matrix_handle, 1, gl.GL_FALSE, model_transform)
+            gl.glBindVertexArray(self.mesh.vao)
+            
+            gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
+
+
 class Object:
-    def __init__(self, mesh_path, material_path, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3), base_color = COLOURS.RED1):
+    def __init__(self, mesh_path, material_path, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3)):
         self.pos = np.array(pos, dtype=np.float32)
         self.rotation = np.array(rotation, dtype=np.float32)
         self.scale = np.array(scale, dtype=np.float32)
-        self.base_color = np.array(base_color, dtype=np.float32)
 
         self.mesh = Mesh(mesh_path)
         self.material = Material(material_path)
@@ -319,6 +386,19 @@ class GraphicsEngine:
                 ]
         }
 
+        if DEBUG:
+            self.debug_shader = self.create_shader(SHADERS_PATH + "debug.vert", SHADERS_PATH + "debug.frag")
+            gl.glUseProgram(self.debug_shader)
+
+            debug_projection_handle =        gl.glGetUniformLocation(self.debug_shader, "projection")
+
+            debug_projection_transform = pyrr.matrix44.create_perspective_projection(fovy = FOV, aspect = aspect, near = 0.1, far = 200, dtype = np.float32)
+            gl.glUniformMatrix4fv(debug_projection_handle, 1, gl.GL_FALSE, debug_projection_transform)
+
+            self.debug_model_matrix_handle = gl.glGetUniformLocation(self.debug_shader, "model")
+            self.debug_view_matrix_handle =  gl.glGetUniformLocation(self.debug_shader, "view")
+            self.debug_color_handle =        gl.glGetUniformLocation(self.debug_shader, "objectColor")
+
     def create_shader(self, vertex_path, fragment_path):
         vertex_src = safe_file_readlines(vertex_path)
         fragment_src = safe_file_readlines(fragment_path)
@@ -348,7 +428,7 @@ class GraphicsEngine:
         
         gl.glUniformMatrix4fv(self.view_matrix_handle, 1, gl.GL_FALSE, view_transform)
         
-        for object in scene.objects.values():
+        for object in scene.get_objects_list():
             object.render(self.model_matrix_handle)
 
         static_lights = scene.get_static_lights()[:100]
@@ -358,7 +438,7 @@ class GraphicsEngine:
             gl.glUniform1f(self.light_handle["strength"][i], light.strength)
         
         avalable_lights = MAX_LIGHTS - len(static_lights)
-        dynamic_lights = scene.get_dynamic_lights()[0:avalable_lights]
+        dynamic_lights = scene.get_dynamic_lights_list()[0:avalable_lights]
 
         for i, light in enumerate(dynamic_lights):
             gl.glUniform3fv(self.light_handle["position"][i], 1, light.position)
@@ -369,6 +449,14 @@ class GraphicsEngine:
 
         gl.glUniform1i(self.total_lights_handle, total_lights)
         gl.glUniform3fv(self.camera_pos_handle, 1, player_pos)
+
+        if DEBUG:
+            gl.glUseProgram(self.debug_shader)
+
+            gl.glUniformMatrix4fv(self.debug_view_matrix_handle, 1, gl.GL_FALSE, view_transform)
+
+            for collider in scene.get_colliders_list():
+                collider.render(self.debug_model_matrix_handle, self.debug_color_handle)
 
     def destroy(self):
         gl.glDeleteProgram(self.shader)
@@ -514,7 +602,7 @@ class Scene():
         self.lock = threading.Lock()
 
         self.running = True
-        self.player_pos = np.array([0, 0, 0], dtype=np.float32)
+        self.set_player_feet([0, 0, 0])
         self.player_acceleration = np.array([0, 0, 0], dtype=np.float32)
         self.player_forward_vector = np.array([0, 0], dtype=np.float32)
         self.update_player_forwards()
@@ -523,27 +611,30 @@ class Scene():
         self.should_center_cursor = True
 
         self.do_screenshot = False
+
         self.previous_f12_state = False
+        self.previous_space_state = False
 
         # Initilize Objs
         self.objects = {
-            'mountain': Object(MODELS_PATH + "mountains.obj", GFX_PATH + "wood.jpeg", [0, -8, 0], [np.pi / 2, np.pi, 0]),
-            'ship':     Object(MODELS_PATH + "ship.obj", GFX_PATH + "rendering_texture.jpg", scale = [0.6, 0.6, 0.6]),
-            'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0]),
-            'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0]),
-            'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -5, 0]),
-            'scene':    Object(MODELS_PATH + "StartScenePrev3.obj", GFX_PATH + "BakeTextTT2 copy.png", [-50, 20, 0])
+            'mountain': Object(MODELS_PATH + "mountains.obj", GFX_PATH + "wood.jpeg", [0, -58, 0], [np.pi / 2, np.pi, 0]),
+            'ship':     Object(MODELS_PATH + "ship.obj", GFX_PATH + "rendering_texture.jpg", [0, -40, 0], scale = [0.6, 0.6, 0.6]),
+            'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, -50, 0], scale = [1, 1, 1]),
+            'cube2':    Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, -50, 0], scale = [2, 2, 2]),
+            'cube3':    Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [20, -30, 20], scale = [1, 1, 1]),
+            'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, -35, 0]),
+            'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -55, 0]),
+            'scene':    Object(MODELS_PATH + "StartScenePrev3.obj", GFX_PATH + "BakeTextTT2 copy.png", [0, 0, 0])
         }
 
         positions = [
             [13.196548, 7.2, 14.3943405],
-            [-1.5363903, -1.7999996, 1.0045668],
-            [-2.1661716, 15.600004, 0.33361638],
-            [5.591684, 18.000006, 3.5366364],
-            [-18.63605, 29.400011, -20.17137],
-            [-51.035877, 27.00001, -20.661451],
-            [-54.75511, 28.20001, 29.686047],
-            [-75.78642, 23.400007, -0.28118283]
+            [-2.1661716, 5.600004, 0.33361638],
+            [5.591684, 8.000006, 3.5366364],
+            [-18.63605, 9.400011, -20.17137],
+            [-51.035877, 7.00001, -20.661451],
+            [-54.75511, 8.20001, 29.686047],
+            [-75.78642, 3.400007, -0.28118283]
         ]
 
         self.static_lights = [
@@ -559,13 +650,43 @@ class Scene():
             for pos in positions
         ]
 
-        self.dynamic_lights = [
-        ]
+        self.dynamic_lights = {
+        }
+
+        self.colliders = {
+            'ground': LockedRectCollider([-100.01, -2, -100.01], [100.01, 0.01, 100.01], debug=True),
+            #'test': LockedRectCollider([-2, -2, -2], [2, 2, 2], debug=True)
+        }
 
         self.fps_monitor = FrameRateMonitor("SCENE")
 
     def set_window(self, window):
         self.window = window
+
+    def set_player_pos(self, new_player_pos):
+        with self.lock:
+            self.player_pos = np.array(new_player_pos, dtype=np.float32)
+
+    def get_player_feet(self):
+        pos = self.get_player_pos()
+        return pos + np.array([0, -DEFAULT_PLAYER_HEIGHT, 0])
+
+    def set_player_feet(self, new_player_feet_pos):
+        self.set_player_pos(np.array(new_player_feet_pos, dtype=np.float32) + np.array([0, DEFAULT_PLAYER_HEIGHT, 0], dtype=np.float32))
+
+    def get_player_acceleration(self):
+        with self.lock:
+            return self.player_acceleration
+        
+    def set_player_acceleration(self, new_player_acceleration):
+        with self.lock:
+            self.player_acceleration = new_player_acceleration
+        
+    def add_player_acceleration(self, add_player_acceleration):
+        np_add_player_acceleration = np.array(add_player_acceleration)
+
+        with self.lock:
+            self.player_acceleration += np_add_player_acceleration
 
     def get_player_pos(self):
         with self.lock:
@@ -611,35 +732,23 @@ class Scene():
         with self.lock:
             return self.dynamic_lights
 
-    """
-    def handle_inputs(self):
-        # Eye movement
-        move_x, move_y = 0, 0
-        if glfw.get_key(self.window, glfw.KEY_W) == glfw.PRESS:
-            move_y += 1
-        if glfw.get_key(self.window, glfw.KEY_S) == glfw.PRESS:
-            move_y -= 1
-        if glfw.get_key(self.window, glfw.KEY_A) == glfw.PRESS:
-            move_x += 1
-        if glfw.get_key(self.window, glfw.KEY_D) == glfw.PRESS:
-            move_x -= 1
-
-        length = math.sqrt(move_x ** 2 + move_y ** 2)
-        if length != 0:
-            move_x /= length
-            move_y /= length
-
+    def get_dynamic_lights_list(self):
         with self.lock:
-            self.player_pos[0] += (move_x * EYE_SPEED)
-            self.player_pos[2] += (move_y * EYE_SPEED)
+            return list(self.dynamic_lights.values())
         
-        self.handle_mouse()
-    """
+    def get_colliders_list(self):
+        with self.lock:
+            return self.colliders.values()
+    
+    def get_objects_list(self):
+        with self.lock:
+            return self.objects.values()
     
     def handle_keys(self):
         combo = 0
         direction_modifier = 0
         d_pos = np.zeros(3, dtype=np.float32)
+        d_acceleration = np.zeros(3, dtype=np.float32)
         
         # Handle movement (WASD)
         if glfw.get_key(self.window, glfw.KEY_W): combo += 1
@@ -665,20 +774,36 @@ class Scene():
         # Check for valid combo and assign corresponding direction modifier
         if combo in direction_modifiers:
             direction_modifier = direction_modifiers[combo]
+
+        sprinting = glfw.get_key(self.window, glfw.KEY_LEFT_SHIFT)
+        if sprinting:
+            speed_multiplier = PLAYER_ACCELERATION_SPRINT_MULTIPLIER
+        else:
+            speed_multiplier = 1
         
         # Calculate movement based on direction modifier
         if direction_modifier:
-            d_pos[0] = EYE_SPEED * np.cos(np.deg2rad(self.player_forward_vector[0] + direction_modifier))
-            d_pos[2] = EYE_SPEED * np.sin(np.deg2rad(self.player_forward_vector[0] + direction_modifier))
+            d_acceleration[0] = PLAYER_ACCELERATION * speed_multiplier * np.cos(np.deg2rad(self.player_forward_vector[0] + direction_modifier))
+            d_acceleration[2] = PLAYER_ACCELERATION * speed_multiplier * np.sin(np.deg2rad(self.player_forward_vector[0] + direction_modifier))
         
         # Handle vertical movement (space = up, ctrl = down)
-        if glfw.get_key(self.window, glfw.KEY_SPACE):
-            d_pos[1] = EYE_SPEED
-        elif glfw.get_key(self.window, glfw.KEY_LEFT_CONTROL):
-            d_pos[1] = -EYE_SPEED
+        if FLIGHT_ENABLED:
+            if glfw.get_key(self.window, glfw.KEY_SPACE):
+                d_pos[1] = PLAYER_ACCELERATION
+            elif glfw.get_key(self.window, glfw.KEY_LEFT_CONTROL):
+                d_pos[1] = -PLAYER_ACCELERATION
+        else:
+            if glfw.get_key(self.window, glfw.KEY_SPACE):
+                if not self.previous_space_state:
+                    self.add_player_acceleration([0, JUMP_STRENGTH, 0])
+                self.previous_space_state = True
+            else:
+                self.previous_space_state = False
 
         with self.lock:
             self.player_pos += d_pos
+
+        self.add_player_acceleration(d_acceleration)
 
         if glfw.get_key(self.window, glfw.KEY_F12):
             if not self.previous_f12_state:
@@ -722,6 +847,8 @@ class Scene():
             self.player_up = np.cross(right, self.player_forwards)
 
     def gravity(self):
+        if FLIGHT_ENABLED:
+            return
         with self.lock:
             self.player_acceleration[1] -= GRAVITY
 
@@ -729,31 +856,31 @@ class Scene():
         with self.lock:
             self.player_pos += self.player_acceleration
 
+            self.player_acceleration *= np.array([HORIZONTAL_DRAG, VERTICAL_DRAG, HORIZONTAL_DRAG])
+    
+    def player_collision(self):
+        pos = self.get_player_feet()
+        colliders = self.get_colliders_list()
+        
+        for collider in colliders:
+            if pos[0] > collider.left and pos[0] < collider.right and pos[1] > collider.bottom and pos[1] < collider.top and pos[2] > collider.front and pos[2] < collider.back:
+                self.set_player_feet([pos[0], collider.top, pos[2]])
+                self.player_acceleration *= np.array([1, 0, 1])
+
     def main(self):
         while self.running:
             start_time = time.perf_counter()
 
-            #self.gravity()
-
+            # PLAYER
             self.handle_keys()
             self.handle_mouse()
 
+            self.gravity()
             self.move_player()
 
-            if random.randint(0, 20) == 0:
-                with self.lock:
-                    self.dynamic_lights.append(
-                        Light(
-                            position = self.player_pos,
-                            color = [
-                                np.random.uniform(0.0, 1.0),
-                                np.random.uniform(0.0, 1.0),
-                                np.random.uniform(0.0, 1.0),
-                            ],
-                            strength = 30
-                        )
-                    )
+            self.player_collision()
 
+            # Tick
             self.fps_monitor.run()
 
             end_time = time.perf_counter()
