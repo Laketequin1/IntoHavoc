@@ -437,12 +437,12 @@ class Window:
     def screenshot_check(self):
         if self.scene.get_do_screenshot():
             # Get image
-            buffer = gl.glReadPixels(0, 0, self.screen_width, self.screen_height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE)
+            buffer = gl.glReadPixels(0, 0, self.screen_width, self.screen_height, gl.GL_RGB, gl.GL_UNSIGNED_BYTE)
 
-            image_data = np.frombuffer(buffer, dtype=np.uint8).reshape((self.screen_height, self.screen_width, 4))
+            image_data = np.frombuffer(buffer, dtype=np.uint8).reshape((self.screen_height, self.screen_width, 3))
             image_data = np.flipud(image_data)
 
-            image = Image.fromarray(image_data, "RGBA")
+            image = Image.fromarray(image_data, "RGB")
 
             # Get filename
             now = datetime.now()
@@ -526,7 +526,7 @@ class Scene():
             'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0]),
             'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0]),
             'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -5, 0]),
-            'scene':    Object(MODELS_PATH + "StartScenePrev2.obj", GFX_PATH + "BakeSceneImage2.png", [-50, 20, 0])
+            'scene':    Object(MODELS_PATH + "StartScenePrev3.obj", GFX_PATH + "BakeTextTT2.png", [-50, 20, 0])
         }
 
         self.lights = {
