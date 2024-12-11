@@ -25,7 +25,7 @@ SPT = 1 / TPS
 
 GL_ERROR_CHECK_DELAY_SEC = 5
 
-EYE_SPEED = 1
+EYE_SPEED = 0.6
 MOUSE_SENSITIVITY = 0.12
 MAX_LOOK_THETA = 89.95 # Must be < 90 degrees
 
@@ -525,7 +525,8 @@ class Scene():
             'ship':     Object(MODELS_PATH + "ship.obj", GFX_PATH + "rendering_texture.jpg", scale = [0.6, 0.6, 0.6]),
             'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0]),
             'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0]),
-            'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -5, 0])
+            'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -5, 0]),
+            'scene':    Object(MODELS_PATH + "StartScenePrev2.obj", GFX_PATH + "BakeSceneImage2.png", [-50, 20, 0])
         }
 
         self.lights = {
