@@ -11,6 +11,7 @@ import atexit
 import math
 import sys
 import time
+from datetime import datetime
 from PIL import Image
 
 from src import COLOURS
@@ -33,6 +34,7 @@ GRAVITY = 0.000981
 SHADERS_PATH = "shaders/"
 MODELS_PATH = "models/"
 GFX_PATH = "gfx/"
+SCREENSHOTS_PATH = "screenshots/"
 
 GLOBAL_UP = np.array([0, 1, 0], dtype=np.float32)
 
@@ -199,6 +201,7 @@ class Material:
         
         # Load image, then get height, and the images data
         image = Image.open(filepath).convert("RGBA")
+        image = image.transpose(Image.FLIP_TOP_BOTTOM)
         image_width, image_height = image.size
         image_data = image.tobytes("raw", "RGBA")
         
@@ -430,6 +433,28 @@ class Window:
         if glfw.window_should_close(self.window) or glfw.get_key(self.window, glfw.KEY_ESCAPE) == glfw.PRESS:
             self.close()
             return
+        
+    def screenshot_check(self):
+        if self.scene.get_do_screenshot():
+            # Get image
+            buffer = gl.glReadPixels(0, 0, self.screen_width, self.screen_height, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE)
+
+            image_data = np.frombuffer(buffer, dtype=np.uint8).reshape((self.screen_height, self.screen_width, 4))
+            image_data = np.flipud(image_data)
+
+            image = Image.fromarray(image_data, "RGBA")
+
+            # Get filename
+            now = datetime.now()
+            filename_timestamp = now.strftime("%Y-%m-%d_%H.%M.%S") + f".{now.microsecond // 1000:03d}"
+            
+            filepath = SCREENSHOTS_PATH + filename_timestamp + ".png"
+
+            # Save
+            image.save(filepath)
+            print(f"Screenshot saved to {filepath}")
+
+            self.scene.set_do_screenshot(False)
 
     def render(self, graphics_engine: GraphicsEngine, scene):
         graphics_engine.render_graphics(scene)
@@ -453,7 +478,7 @@ class Window:
         glfw.terminate()
 
     def check_gl_error(self):
-        if time.perf_counter() > self.gl_error_check_time + GL_ERROR_CHECK_DELAY_SEC:
+        if time.perf_counter() > self.gl_error_check_time + GL_ERROR_CHECK_DELAY_SEC:            
             error = gl.glGetError()
             if error != gl.GL_NO_ERROR:
                 print(f"OpenGL error: {error}")
@@ -470,12 +495,14 @@ class Window:
             self.mouse_move_func()
             self.check_gl_error()
             self.handle_window_events()
+            self.screenshot_check()
 
 
 class Scene():
     def __init__(self, events, window, screen_size):
         self.events = events
-        self.window = window
+        self.window_handler = window
+        self.window = window.window
         self.screen_width, self.screen_height = screen_size
 
         self.lock = threading.Lock()
@@ -489,12 +516,16 @@ class Scene():
         self.mouse_pos = np.array([self.screen_width / 2, self.screen_height / 2], dtype=np.int16)
         self.should_center_cursor = True
 
+        self.do_screenshot = False
+        self.previous_f12_state = False
+
         # Initilize Objs
         self.objects = {
             'mountain': Object(MODELS_PATH + "mountains.obj", GFX_PATH + "wood.jpeg", [0, -8, 0], [np.pi / 2, np.pi, 0]),
             'ship':     Object(MODELS_PATH + "ship.obj", GFX_PATH + "rendering_texture.jpg", scale = [0.6, 0.6, 0.6]),
             'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0]),
-            'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0])
+            'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0]),
+            'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -5, 0])
         }
 
         self.lights = {
@@ -524,6 +555,14 @@ class Scene():
     def get_mouse_pos(self):
         with self.lock:
             return self.mouse_pos
+        
+    def set_do_screenshot(self, bool_should_do_screenshot):
+        with self.lock:
+            self.do_screenshot = bool_should_do_screenshot
+
+    def get_do_screenshot(self):
+        with self.lock:
+            return self.do_screenshot
 
     def set_should_center_cursor(self, bool_should_center_cursor):
         with self.lock:
@@ -602,6 +641,13 @@ class Scene():
         with self.lock:
             self.player_pos += d_pos
 
+        if glfw.get_key(self.window, glfw.KEY_F12):
+            if not self.previous_f12_state:
+                self.set_do_screenshot(True)
+            self.previous_f12_state = True
+        else:
+            self.previous_f12_state = False
+
     def handle_mouse(self):
         x, y = glfw.get_cursor_pos(self.window)
         self.set_should_center_cursor(True)
@@ -670,7 +716,7 @@ class Scene():
 def main():
     window = Window()
     graphics_engine = GraphicsEngine(window.aspect)
-    scene = Scene(events, window.window, (window.screen_width, window.screen_height))
+    scene = Scene(events, window, (window.screen_width, window.screen_height))
 
     #scene.set_window(window.window)
     window.init(graphics_engine, scene)

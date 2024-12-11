@@ -16,5 +16,5 @@ void main()
     // Ambient lighting
     temp += texture(imageTexture, fragmentTexCoord).rgb * 0.3;
 
-    color = vec4(temp, 1.0);
+    color = vec4(temp, texture(imageTexture, fragmentTexCoord).a);
 }
