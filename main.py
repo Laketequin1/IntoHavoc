@@ -11,6 +11,7 @@ import atexit
 import math
 import sys
 import time
+import random
 from datetime import datetime
 from PIL import Image
 
@@ -24,6 +25,8 @@ FOV = 93
 SPT = 1 / TPS
 
 GL_ERROR_CHECK_DELAY_SEC = 5
+
+MAX_LIGHTS = 100
 
 EYE_SPEED = 0.6
 MOUSE_SENSITIVITY = 0.12
@@ -221,19 +224,17 @@ class Material:
 
 
 class Object:
-    def __init__(self, mesh_path, material_path, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3), base_color = COLOURS.RED1, outline = False):
+    def __init__(self, mesh_path, material_path, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3), base_color = COLOURS.RED1):
         self.pos = np.array(pos, dtype=np.float32)
         self.rotation = np.array(rotation, dtype=np.float32)
         self.scale = np.array(scale, dtype=np.float32)
         self.base_color = np.array(base_color, dtype=np.float32)
-        self.outline = outline
 
         self.mesh = Mesh(mesh_path)
         self.material = Material(material_path)
         self.material.use()
 
-    def render(self, model_matrix_handle, color_handle):
-        gl.glUniform3fv(color_handle, 1, self.base_color)
+    def render(self, model_matrix_handle):
         self.material.use()
         
         model_transform = pyrr.matrix44.create_identity(dtype = np.float32)
@@ -261,11 +262,6 @@ class Object:
         gl.glBindVertexArray(self.mesh.vao)
         
         gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
-
-        # Draw debug lines
-        if self.outline:
-            gl.glUniform3fv(color_handle, 1, self.base_color)
-            gl.glDrawArrays(gl.GL_LINES, 0, self.mesh.vertex_count)
     
     def destroy(self):
         self.mesh.destroy()
@@ -292,7 +288,7 @@ class GraphicsEngine:
         gl.glUseProgram(self.shader)
 
         # Initilize texture
-        texture_handle = gl.glGetUniformLocation(self.shader, "imageTexture") # imageTexture
+        texture_handle = gl.glGetUniformLocation(self.shader, "imageTexture")
         gl.glUniform1i(texture_handle, 0) # NEED TO CHANGE FOR EACH OBJECT??!?!?!?!??! (MAYBE)
 
         # Initilize projection
@@ -301,28 +297,28 @@ class GraphicsEngine:
         projection_transform = pyrr.matrix44.create_perspective_projection(fovy = FOV, aspect = aspect, near = 0.1, far = 200, dtype = np.float32)
         gl.glUniformMatrix4fv(projection_handle, 1, gl.GL_FALSE, projection_transform)
 
+        # Vertex shader
         self.model_matrix_handle = gl.glGetUniformLocation(self.shader, "model")
         self.view_matrix_handle =  gl.glGetUniformLocation(self.shader, "view")
-        self.color_handle =        gl.glGetUniformLocation(self.shader, "objectColor")
-        self.camera_pos_handle =   gl.glGetUniformLocation(self.shader, "cameraPosition") # cameraPosition
 
-        """
+        # Fragment shader
+        self.total_lights_handle = gl.glGetUniformLocation(self.shader, "totalLights") 
+        self.camera_pos_handle =   gl.glGetUniformLocation(self.shader, "cameraPosition")
         self.light_handle = {
             "position": [
-                gl.glGetUniformLocation(self.shader, f"Lights[{i}].position")
-                for i in range(8)
+                gl.glGetUniformLocation(self.shader, f"lights[{i}].position")
+                for i in range(MAX_LIGHTS)
                 ],
             "color": [
-                gl.glGetUniformLocation(self.shader, f"Lights[{i}].color")
-                for i in range(8)
+                gl.glGetUniformLocation(self.shader, f"lights[{i}].color")
+                for i in range(MAX_LIGHTS)
                 ],
             "strength": [
-                gl.glGetUniformLocation(self.shader, f"Lights[{i}].strength")
-                for i in range(8)
+                gl.glGetUniformLocation(self.shader, f"lights[{i}].strength")
+                for i in range(MAX_LIGHTS)
                 ]
         }
-        """
-    
+
     def create_shader(self, vertex_path, fragment_path):
         vertex_src = safe_file_readlines(vertex_path)
         fragment_src = safe_file_readlines(fragment_path)
@@ -353,15 +349,25 @@ class GraphicsEngine:
         gl.glUniformMatrix4fv(self.view_matrix_handle, 1, gl.GL_FALSE, view_transform)
         
         for object in scene.objects.values():
-            object.render(self.model_matrix_handle, self.color_handle)
+            object.render(self.model_matrix_handle)
 
-        """
-        for i, light in enumerate(scene.lights):
-            gl.glUniform3fv(self.light_location["position"][i], 1, light.position)
-            gl.glUniform3fv(self.light_location["color"][i], 1, light.color)
-            gl.glUniform1f(self.light_location["strength"][i], light.strength)
-        """
+        static_lights = scene.get_static_lights()[:100]
+        for i, light in enumerate(static_lights):
+            gl.glUniform3fv(self.light_handle["position"][i], 1, light.position)
+            gl.glUniform3fv(self.light_handle["color"][i], 1, light.color)
+            gl.glUniform1f(self.light_handle["strength"][i], light.strength)
+        
+        avalable_lights = MAX_LIGHTS - len(static_lights)
+        dynamic_lights = scene.get_dynamic_lights()[0:avalable_lights]
 
+        for i, light in enumerate(dynamic_lights):
+            gl.glUniform3fv(self.light_handle["position"][i], 1, light.position)
+            gl.glUniform3fv(self.light_handle["color"][i], 1, light.color)
+            gl.glUniform1f(self.light_handle["strength"][i], light.strength)
+        
+        total_lights = len(static_lights) + len(dynamic_lights)
+
+        gl.glUniform1i(self.total_lights_handle, total_lights)
         gl.glUniform3fv(self.camera_pos_handle, 1, player_pos)
 
     def destroy(self):
@@ -529,8 +535,32 @@ class Scene():
             'scene':    Object(MODELS_PATH + "StartScenePrev3.obj", GFX_PATH + "BakeTextTT2 copy.png", [-50, 20, 0])
         }
 
-        self.lights = {
-        }
+        positions = [
+            [13.196548, 7.2, 14.3943405],
+            [-1.5363903, -1.7999996, 1.0045668],
+            [-2.1661716, 15.600004, 0.33361638],
+            [5.591684, 18.000006, 3.5366364],
+            [-18.63605, 29.400011, -20.17137],
+            [-51.035877, 27.00001, -20.661451],
+            [-54.75511, 28.20001, 29.686047],
+            [-75.78642, 23.400007, -0.28118283]
+        ]
+
+        self.static_lights = [
+            Light(
+                position = pos,
+                color = [
+                    np.random.uniform(0.0, 1.0),
+                    np.random.uniform(0.0, 1.0),
+                    np.random.uniform(0.0, 1.0),
+                ],
+                strength = 18
+            )
+            for pos in positions
+        ]
+
+        self.dynamic_lights = [
+        ]
 
         self.fps_monitor = FrameRateMonitor("SCENE")
 
@@ -572,6 +602,14 @@ class Scene():
     def get_should_center_cursor(self):
         with self.lock:
             return self.should_center_cursor
+        
+    def get_static_lights(self):
+        with self.lock:
+            return self.static_lights
+        
+    def get_dynamic_lights(self):
+        with self.lock:
+            return self.dynamic_lights
 
     """
     def handle_inputs(self):
@@ -649,6 +687,9 @@ class Scene():
         else:
             self.previous_f12_state = False
 
+        if glfw.get_key(self.window, glfw.KEY_ENTER):
+            print(self.get_player_pos())
+
     def handle_mouse(self):
         x, y = glfw.get_cursor_pos(self.window)
         self.set_should_center_cursor(True)
@@ -698,6 +739,20 @@ class Scene():
             self.handle_mouse()
 
             self.move_player()
+
+            if random.randint(0, 20) == 0:
+                with self.lock:
+                    self.dynamic_lights.append(
+                        Light(
+                            position = self.player_pos,
+                            color = [
+                                np.random.uniform(0.0, 1.0),
+                                np.random.uniform(0.0, 1.0),
+                                np.random.uniform(0.0, 1.0),
+                            ],
+                            strength = 30
+                        )
+                    )
 
             self.fps_monitor.run()
 
