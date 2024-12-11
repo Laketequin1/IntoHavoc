@@ -33,8 +33,8 @@ MAX_LOOK_THETA = 89.95 # Must be < 90 degrees
 
 PLAYER_ACCELERATION = 1.56 / TPS
 PLAYER_ACCELERATION_SPRINT_MULTIPLIER = 1.88
-JUMP_STRENGTH = 0.42
-GRAVITY = 9.81 / 6 / TPS
+JUMP_STRENGTH = 0.3
+GRAVITY = 9.81 / 8 / TPS
 HORIZONTAL_DRAG = 0.8
 VERTICAL_DRAG = 0.998
 DEFAULT_PLAYER_HEIGHT = 3
@@ -45,7 +45,7 @@ GFX_PATH = "gfx/"
 SCREENSHOTS_PATH = "screenshots/"
 
 FLIGHT_ENABLED = False
-DEBUG = True
+DEBUG = False
 DEBUG_TRANSPARENCY = 0.2
 DEBUG_RECT_MODEL = "debug_rect.obj"
 
@@ -655,14 +655,14 @@ class Scene():
 
         self.colliders = {
             'ground': LockedRectCollider([-100.01, -2, -100.01], [100.01, 0.01, 100.01], debug=True),
-            'platform': LockedRectCollider([-23, 4.6, -7], [-37, 4.8, 6.5], debug=True),
+            'platform': LockedRectCollider([-23, 4.4, -7], [-37, 4.8, 6.5], debug=True),
             #'stair1': LockedRectCollider([-18.4, -0.1, 1.2], [-19, 0.6, -1.2], debug=True),
             #'test': LockedRectCollider([-2, -2, -2], [2, 2, 2], debug=True)
         }
 
         stair_count = 8
         for x in range(stair_count):
-            self.colliders[f"stair{x}"] = LockedRectCollider([-18.4 - x*0.6, -0.1 + x*0.59, 1.2], [-19 - x*0.6, 0.6 + x*0.59, -1.2], debug=True)
+            self.colliders[f"stair{x}"] = LockedRectCollider([-18.4 - x*0.6, -0.7 + x*0.59, 1.2], [-19 - x*0.6, 0.6 + x*0.59, -1.2], debug=True)
 
         self.fps_monitor = FrameRateMonitor("SCENE")
 
