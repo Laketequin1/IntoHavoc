@@ -37,7 +37,7 @@ JUMP_STRENGTH = 0.42
 GRAVITY = 9.81 / 6 / TPS
 HORIZONTAL_DRAG = 0.8
 VERTICAL_DRAG = 0.998
-DEFAULT_PLAYER_HEIGHT = 3.2
+DEFAULT_PLAYER_HEIGHT = 3
 
 SHADERS_PATH = "shaders/"
 MODELS_PATH = "models/"
@@ -655,8 +655,14 @@ class Scene():
 
         self.colliders = {
             'ground': LockedRectCollider([-100.01, -2, -100.01], [100.01, 0.01, 100.01], debug=True),
+            'platform': LockedRectCollider([-23, 4.6, -7], [-37, 4.8, 6.5], debug=True),
+            #'stair1': LockedRectCollider([-18.4, -0.1, 1.2], [-19, 0.6, -1.2], debug=True),
             #'test': LockedRectCollider([-2, -2, -2], [2, 2, 2], debug=True)
         }
+
+        stair_count = 8
+        for x in range(stair_count):
+            self.colliders[f"stair{x}"] = LockedRectCollider([-18.4 - x*0.6, -0.1 + x*0.59, 1.2], [-19 - x*0.6, 0.6 + x*0.59, -1.2], debug=True)
 
         self.fps_monitor = FrameRateMonitor("SCENE")
 
@@ -813,7 +819,7 @@ class Scene():
             self.previous_f12_state = False
 
         if glfw.get_key(self.window, glfw.KEY_ENTER):
-            print(self.get_player_pos())
+            print("\033[32m" + str(self.get_player_feet()) + "\033[0m")
 
     def handle_mouse(self):
         x, y = glfw.get_cursor_pos(self.window)
