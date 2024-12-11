@@ -526,7 +526,7 @@ class Scene():
             'cube':     Object(MODELS_PATH + "cube.obj", GFX_PATH + "rendering_texture.jpg", [0, 10, 0]),
             'test':     Object(MODELS_PATH + "Pipes.obj", GFX_PATH + "PipesBake.png", [0, 15, 0]),
             'cans':     Object(MODELS_PATH + "cans2.obj", GFX_PATH + "BakeImage.png", [0, -5, 0]),
-            'scene':    Object(MODELS_PATH + "StartScenePrev3.obj", GFX_PATH + "BakeTextTT2.png", [-50, 20, 0])
+            'scene':    Object(MODELS_PATH + "StartScenePrev3.obj", GFX_PATH + "BakeTextTT2 copy.png", [-50, 20, 0])
         }
 
         self.lights = {
