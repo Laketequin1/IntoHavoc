@@ -28,7 +28,7 @@ void main() {
     temp += texture(imageTexture, fragmentTexCoord).rgb * 0.2;
 
     for (int i = 0; i < totalLights; i++){
-        temp += calculatePointLight(lights[i], fragmentPosition, fragmentNormal);
+        temp += calculatePointLight(lights[i], fragmentPosition, normalize(fragmentNormal));
     }
 
     color = vec4(temp, texture(imageTexture, fragmentTexCoord).a);

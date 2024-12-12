@@ -1223,7 +1223,7 @@ class Scene():
 
         self.rigid_bodies = {
             'cube':  Cuboid(GFX_PATH + "wood.jpeg", pos = [9, 1.6, 0], velocity = [0.025, 0, 0], angular_velocity = [0, 0, np.pi / TPS]),
-            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[2, 2, 2], eulers=[np.pi/5, np.pi/5, np.pi/5]),
+            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[2, 2, 3.5], eulers=[np.pi/5, np.pi/5, np.pi/5]),
             #'cube3': Cuboid(GFX_PATH + "wood.jpeg", pos = [2.2, 1, 0], size=[1, 1, 1]),
             #'cube4': Cuboid(GFX_PATH + "wood.jpeg", pos = [4.4, 1, 0], size=[1, 1, 1]),
             'sphere': Sphere(GFX_PATH + "wood.jpeg", pos = [2.5, 6.6234234, 2.12], radius=3)
