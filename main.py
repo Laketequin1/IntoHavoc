@@ -14,12 +14,19 @@ import time
 import random
 from datetime import datetime
 from PIL import Image
+from functools import wraps
+import copy
 
 from src import COLOURS
 
 ### Constants ###
+FLIGHT_ENABLED = False
+DEBUG = True
+DEBUG_TRANSPARENCY = 0.2
+DEBUG_RECT_MODEL = "debug_rect.obj"
+
 TPS = 60
-FPS_CAP = 1 # Set to 0 for uncapped FPS, 1 for VSYNC, 2+ for CAP
+FPS_CAP = 1 if not DEBUG else 0 # Set to 0 for uncapped FPS, 1 for VSYNC, 2+ for CAP
 FOV = 93
 
 SPT = 1 / TPS
@@ -38,16 +45,15 @@ GRAVITY = 9.81 / 8 / TPS
 HORIZONTAL_DRAG = 0.8
 VERTICAL_DRAG = 0.998
 DEFAULT_PLAYER_HEIGHT = 3
+OBJECT_DRAG = 0.7
 
 SHADERS_PATH = "shaders/"
 MODELS_PATH = "models/"
 GFX_PATH = "gfx/"
 SCREENSHOTS_PATH = "screenshots/"
 
-FLIGHT_ENABLED = False
-DEBUG = False
-DEBUG_TRANSPARENCY = 0.2
-DEBUG_RECT_MODEL = "debug_rect.obj"
+CUBOID_MODEL = "cube.obj"
+SPHERE_MODEL = "sphere.obj"
 
 GLOBAL_UP = np.array([0, 1, 0], dtype=np.float32)
 
@@ -73,6 +79,9 @@ atexit.register(exit_handler)
 ### DEBUGGING ###
 class FrameRateMonitor:
     def __init__(self, name=""):
+        if not DEBUG:
+            return
+        
         self.frame_times = []
         self.last_update_time = None
         self.name = name
@@ -80,6 +89,9 @@ class FrameRateMonitor:
         self.total_elapsed = 0
 
     def print_fps(self):
+        if not DEBUG:
+            return
+        
         if len(self.frame_times) and self.total_elapsed:
             fps = len(self.frame_times) / self.total_elapsed
 
@@ -89,6 +101,9 @@ class FrameRateMonitor:
         self.total_elapsed = 0
 
     def run(self):
+        if not DEBUG:
+            return
+
         current_time = time.time()
 
         if self.last_update_time == None:
@@ -113,6 +128,319 @@ def safe_file_readlines(path):
         raise Exception(f"Error: Vertex shader file not found at '{path}'.")
     except IOError as e:
         raise Exception(f"Error: Unable to read vertex shader file '{path}': {e}")
+
+def async_lock(func):
+    """Decorator to automatically acquire and release a lock."""
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        with self.lock:
+            return copy.deepcopy(func(self, *args, **kwargs))
+    return wrapper
+
+def euler_to_rotation_matrix(roll, pitch, yaw):
+    R_x = np.array([
+        [1, 0, 0],
+        [0, np.cos(roll), -np.sin(roll)],
+        [0, np.sin(roll), np.cos(roll)]
+    ])
+    R_y = np.array([
+        [np.cos(pitch), 0, np.sin(pitch)],
+        [0, 1, 0],
+        [-np.sin(pitch), 0, np.cos(pitch)]
+    ])
+    R_z = np.array([
+        [np.cos(yaw), -np.sin(yaw), 0],
+        [np.sin(yaw), np.cos(yaw), 0],
+        [0, 0, 1]
+    ])
+    
+    return R_z @ R_y @ R_x
+
+def line_circle_intersection(p1, p2, circle_center, radius):
+    print(p1, p2, circle_center, radius)
+    # Unpack points
+    x1, y1 = p1
+    x2, y2 = p2
+    cx, cy = circle_center
+    
+    # Vector for the line
+    dx = x2 - x1
+    dy = y2 - y1
+    
+    # Circle equation: (x - cx)^2 + (y - cy)^2 = r^2
+    # Parametric line equations: x(t) = x1 + t * dx, y(t) = y1 + t * dy
+    # Substituting these into the circle's equation gives a quadratic in t
+
+    # Coefficients for the quadratic equation At^2 + Bt + C = 0
+    A = dx**2 + dy**2
+    B = 2 * (dx * (x1 - cx) + dy * (y1 - cy))
+    C = (x1 - cx)**2 + (y1 - cy)**2 - radius**2
+    
+    # Solve the quadratic equation
+    discriminant = B**2 - 4*A*C
+    
+    # No intersection (discriminant < 0)
+    if discriminant < 0 or A == 0:
+        return None
+
+    # Two intersections, we want the first one (smallest t)
+    t1 = (-B - np.sqrt(discriminant)) / (2 * A)
+    t2 = (-B + np.sqrt(discriminant)) / (2 * A)
+    
+    # Return the first intersection point (smallest t > 0)
+    t = min(t1, t2) if min(t1, t2) >= 0 else max(t1, t2)
+
+    print(t)
+
+    if t < 0 or t > 1 or t is np.nan:
+        return None
+    
+    # Calculate the intersection point
+    intersection_x = x1 + t * dx
+    intersection_y = y1 + t * dy
+    
+    return np.array([intersection_x, intersection_y], dtype=np.float32)
+
+def line_sphere_intersection(p1, p2, sphere_center, radius):
+    print(p1, p2, sphere_center, radius)
+    # Convert points to numpy arrays
+    p1 = np.array(p1, dtype=np.float32)
+    p2 = np.array(p2, dtype=np.float32)
+    sphere_center = np.array(sphere_center, dtype=np.float32)
+    
+    # Vector from p1 to p2 (direction of the line)
+    line_dir = p2 - p1
+    # Vector from p1 to sphere center
+    p1_to_center = p1 - sphere_center
+    
+    # Coefficients of the quadratic equation A * t^2 + B * t + C = 0
+    A = np.dot(line_dir, line_dir)
+    B = 2 * np.dot(p1_to_center, line_dir)
+    C = np.dot(p1_to_center, p1_to_center) - radius**2
+    
+    # Discriminant of the quadratic equation
+    discriminant = B**2 - 4 * A * C
+
+    if discriminant < 0 or A == 0:
+        # No intersection
+        return None
+    
+    # Solve for t (the parameter of the intersection point)
+    sqrt_disc = np.sqrt(discriminant)
+    t1 = (-B - sqrt_disc) / (2 * A)
+    t2 = (-B + sqrt_disc) / (2 * A)
+
+    t_list = [t for t in [t1, t2] if t >= 0]
+
+    if len(t_list) == 0:
+        return None
+    
+    # We want the smallest positive t (the first intersection)
+    t = min(t for t in [t1, t2] if t >= 0)
+
+    print(f"T: {t}")
+    
+    if t < 0 or t > 1 or t is np.nan:
+        # The line does not intersect the sphere in the positive direction
+        return None
+    
+    # Compute the intersection point
+    intersection_point = p1 + t * line_dir
+    return intersection_point
+
+def line_cuboid_intersection(ray_start, ray_finish, cuboid_center, cuboid_size):
+    width, height, depth = cuboid_size
+
+    # Convert input points to NumPy arrays for efficient computation
+    box_min = np.array([cuboid_center[0] - width / 2, cuboid_center[1] - height / 2, cuboid_center[2] - depth / 2])
+    box_max = np.array([cuboid_center[0] + width / 2, cuboid_center[1] + height / 2, cuboid_center[2] + depth / 2])
+    ray_start = np.array(ray_start)
+    ray_finish = np.array(ray_finish)
+    
+    # Ray direction (normalized)
+    ray_dir = ray_finish - ray_start
+    if ray_dir.all() > 0:
+        ray_inv_dir = 1.0 / ray_dir
+    else:
+        ray_inv_dir = 9999999
+
+    # Initialize tmin and tmax for ray-box intersection in each dimension
+    tmin = (box_min - ray_start) * ray_inv_dir
+    tmax = (box_max - ray_start) * ray_inv_dir
+    
+    # For each axis (x, y, z), calculate the min and max t values
+    tmin = np.minimum(tmin, tmax)
+    tmax = np.maximum(tmin, tmax)
+    
+    # Find the overall tmin and tmax
+    tmin_final = np.max(tmin)
+    tmax_final = np.min(tmax)
+    
+    # Check if there is an intersection
+    if tmax_final >= tmin_final:
+        # Calculate the intersection point
+        intersection_point = ray_start + tmin_final * ray_dir
+        return intersection_point
+    else:
+        return None
+
+def line_cuboid_collision(p1, p2, cuboid_center, cuboid_size, euler_angles):
+    # Unpack cuboid properties
+    cx, cy, cz = cuboid_center
+    w, h, d = cuboid_size
+    roll, pitch, yaw = euler_angles
+
+    # Convert Euler angles to rotation matrix
+    R = euler_to_rotation_matrix(roll, pitch, yaw)
+    R_inv = R.T  # Inverse of rotation matrix is its transpose
+
+    # Transform line segment to cuboid's local space
+    p1_local = R_inv @ (np.array(p1) - np.array([cx, cy, cz]))
+    p2_local = R_inv @ (np.array(p2) - np.array([cx, cy, cz]))
+
+    collision = line_cuboid_intersection(p1_local, p2_local, (0, 0, 0), cuboid_size)
+
+    return collision
+
+"""
+def line_cuboid_collision(p1, p2, cuboid_center, cuboid_size, euler_angles):
+    # Unpack cuboid properties
+    cx, cy, cz = cuboid_center
+    w, h, d = cuboid_size
+    roll, pitch, yaw = euler_angles
+
+    # Convert Euler angles to rotation matrix
+    R = euler_to_rotation_matrix(roll, pitch, yaw)
+    R_inv = R.T  # Inverse of rotation matrix is its transpose
+
+    # Transform line segment to cuboid's local space
+    p1_local = R_inv @ (np.array(p1) - np.array([cx, cy, cz]))
+    p2_local = R_inv @ (np.array(p2) - np.array([cx, cy, cz]))
+
+    # Axis-aligned bounds in local space
+    bounds = [
+        (-w / 2, w / 2),  # x-bounds
+        (-h / 2, h / 2),  # y-bounds
+        (-d / 2, d / 2)   # z-bounds
+    ]
+
+    # Slab method in local space
+    t_entry = 0
+    t_exit = 1
+    for i in range(3):  # Iterate over x, y, z axes
+        p1_axis = p1_local[i]
+        p2_axis = p2_local[i]
+        min_bound, max_bound = bounds[i]
+        
+        direction = p2_axis - p1_axis
+        if abs(direction) < 1e-8:  # Line is parallel to the axis
+            if p1_axis < min_bound or p1_axis > max_bound:
+                return None  # No collision
+            continue
+        
+        t_min = (min_bound - p1_axis) / direction
+        t_max = (max_bound - p1_axis) / direction
+        if t_min > t_max:  # Normalize
+            t_min, t_max = t_max, t_min
+        
+        t_entry = max(t_entry, t_min)
+        t_exit = min(t_exit, t_max)
+        
+        if t_entry > t_exit:
+            return None  # No collision
+"""
+
+def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, euler_angles):
+    extended_cuboid_size = cuboid_size + radius * 2
+
+    # Unpack cuboid properties
+    cx, cy, cz = cuboid_center
+    w, h, d = extended_cuboid_size
+    roll, pitch, yaw = euler_angles
+
+    # Convert Euler angles to rotation matrix
+    R = euler_to_rotation_matrix(roll, pitch, yaw)
+    R_inv = R.T  # Inverse of rotation matrix is its transpose
+    
+    # Transform line segment to cuboid's local space
+    p1_local = R_inv @ (np.array(p1) - np.array([cx, cy, cz]))
+    p2_local = R_inv @ (np.array(p2) - np.array([cx, cy, cz]))
+    
+    # Axis-aligned bounds in local space
+    bounds = [
+        (-w / 2, w / 2),  # x-bounds
+        (-h / 2, h / 2),  # y-bounds
+        (-d / 2, d / 2)   # z-bounds
+    ]
+    
+    # Slab method in local space
+    t_entry = 0
+    t_exit = 1
+    for i in range(3):  # Iterate over x, y, z axes
+        p1_axis = p1_local[i]
+        p2_axis = p2_local[i]
+        min_bound, max_bound = bounds[i]
+        
+        direction = p2_axis - p1_axis
+        if abs(direction) < 1e-8:  # Line is parallel to the axis
+            if p1_axis < min_bound or p1_axis > max_bound:
+                return None  # No collision
+            continue
+        
+        t_min = (min_bound - p1_axis) / direction
+        t_max = (max_bound - p1_axis) / direction
+        if t_min > t_max:  # Normalize
+            t_min, t_max = t_max, t_min
+        
+        t_entry = max(t_entry, t_min)
+        t_exit = min(t_exit, t_max)
+        
+        if t_entry > t_exit:
+            return None  # No collision
+    
+    # Compute collision point in local space
+    collision_local = p1_local + t_entry * (p2_local - p1_local)
+
+    """
+    collision_local = line_cuboid_collision(p1, p2, cuboid_center, extended_cuboid_size, euler_angles)
+    if collision_local is None:
+        return collision_local
+    """
+
+    abs_pos = np.abs(collision_local)
+
+    axes = [i for i, x in enumerate(abs_pos) if x > cuboid_size[i] / 2]
+
+    if len(axes) == 3: # Corner
+        print("CORNER")
+        sphere_center = np.array([np.sign(collision_local[0]) * cuboid_size[0] / 2, np.sign(collision_local[1]) * cuboid_size[1] / 2, np.sign(collision_local[2]) * cuboid_size[2] / 2])
+        collision_local = line_sphere_intersection(p1_local, p2_local, sphere_center, radius)
+        if collision_local is None:
+            return None
+    elif len(axes) == 2: # Edge
+        print("EDGE")
+        x = collision_local[axes[0]]
+        y = collision_local[axes[1]]
+
+        possible_axes = [0, 1, 2]
+        removed_axes = [axis for axis in possible_axes if axis not in axes]
+
+        p1_2D = np.delete(p1_local, removed_axes)
+        p2_2D = np.delete(p2_local, removed_axes)
+        circle_center = np.array([np.sign(x) * cuboid_size[axes[0]] / 2, np.sign(y) * cuboid_size[axes[1]] / 2])
+
+        collision_local_2D = line_circle_intersection(p1_2D, p2_2D, circle_center, radius)
+
+        if collision_local_2D is None:
+            return None
+        
+        collision_local[axes[0]] = collision_local_2D[0]
+        collision_local[axes[1]] = collision_local_2D[1]
+    # else: just don't worry about it
+    
+    # Transform collision point back to world space
+    collision_world = R @ collision_local + np.array([cx, cy, cz])
+    return collision_world
 
 
 ### Classes ####
@@ -291,6 +619,235 @@ class LockedRectCollider: # Create parent class for future colliders
             gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
 
 
+class Cuboid:
+    def __init__(self, material_path, eulers = np.zeros(3, dtype=np.float32), angular_velocity = np.zeros(3, dtype=np.float32), mass = 1, pos = np.zeros(3, dtype=np.float32), velocity = np.zeros(3, dtype=np.float32), size = np.ones(3, dtype=np.float32)):
+        self.eulers = np.array(eulers, dtype=np.float32)
+        self.angular_velocity = np.array(angular_velocity, dtype=np.float32)
+        self.mass = mass
+        self.pos = np.array(pos, dtype=np.float32)
+        self.velocity = np.array(velocity, dtype=np.float32)
+        self.size = np.array(size, dtype=np.float32)
+        self.scale = self.size / 2 # Mesh is 2x2x2
+
+        self.volume = np.prod(self.size)
+        self.density = self.mass / self.volume
+
+        self.inertia_0 = self.calculate_inertia()
+
+        self.mesh = Mesh(MODELS_PATH + CUBOID_MODEL)
+        self.material = Material(material_path)
+
+        self.lock = threading.Lock()
+
+    def calculate_inertia(self):
+        return self.density * np.array([self.size[1]**2 + self.size[2]**2, self.size[0]**2 + self.size[2]**2, self.size[0]**2 + self.size[1]**2]) / 12
+    
+    @async_lock
+    def get_pos(self):
+        return self.pos
+    
+    @async_lock
+    def get_size(self):
+        return self.size
+    
+    @async_lock
+    def get_velocity(self):
+        return self.velocity
+    
+    @async_lock
+    def get_eulers(self):
+        return self.eulers
+
+    @async_lock
+    def get_angular_velocity(self):
+        return self.angular_velocity
+    
+    @async_lock
+    def add_angular_velocity(self, d_angular_velocity):
+        self.eulers += np.array(d_angular_velocity)
+
+    @async_lock
+    def add_pos(self, d_pos):
+        self.pos += np.array(d_pos)
+
+    def simulate(self, _rigid_bodies_list):
+        self.add_pos(self.get_velocity())
+        self.add_angular_velocity(self.get_angular_velocity())
+
+    def render(self, model_matrix_handle):
+        pos = self.get_pos()
+
+        self.material.use()
+        
+        model_transform = pyrr.matrix44.create_identity(dtype = np.float32)
+
+        # Scale
+        model_transform = pyrr.matrix44.multiply(
+            m1 = model_transform,
+            m2 = pyrr.matrix44.create_from_scale(self.scale, dtype = np.float32)
+        )
+
+        # Rotate around origin
+        model_transform = pyrr.matrix44.multiply(
+            m1 = model_transform,
+            m2 = pyrr.matrix44.create_from_eulers(self.eulers, dtype = np.float32)
+        )
+
+        # Translate
+        model_transform = pyrr.matrix44.multiply(
+            m1 = model_transform,
+            m2 = pyrr.matrix44.create_from_translation(pos, dtype = np.float32)
+        )
+        
+        # Complete transform
+        gl.glUniformMatrix4fv(model_matrix_handle, 1, gl.GL_FALSE, model_transform)
+        gl.glBindVertexArray(self.mesh.vao)
+        
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
+
+    def destroy(self):
+        self.mesh.destroy()
+        self.material.destroy()
+
+
+class Sphere:
+    def __init__(self, material_path, eulers = np.zeros(3, dtype=np.float32), angular_velocity = np.zeros(3, dtype=np.float32), mass = 1, pos = np.zeros(3, dtype=np.float32), velocity = np.zeros(3, dtype=np.float32), radius = 0.5):
+        self.rotation = np.array(eulers, dtype=np.float32)
+        self.angular_velocity = np.array(angular_velocity, dtype=np.float32)
+        self.mass = mass
+        self.pos = np.array(pos, dtype=np.float32)
+        self.velocity = np.array(velocity, dtype=np.float32)
+        self.radius = radius
+
+        self.acceleration = np.zeros(3)
+        self.scale = np.array([radius * 2, radius * 2, radius * 2]) / 2 # Mesh is 2x2x2
+        self.volume = 4 * np.pi * self.radius**2
+        self.density = self.mass / self.volume
+
+        self.inertia_0 = self.calculate_inertia()
+
+        self.mesh = Mesh(MODELS_PATH + SPHERE_MODEL)
+        self.material = Material(material_path)
+
+        self.lock = threading.Lock()
+
+    def calculate_inertia(self):
+        return (2/5) * self.mass * self.radius**2
+    
+    # Get
+    @async_lock
+    def get_pos(self):
+        return self.pos
+    
+    @async_lock
+    def get_velocity(self):
+        return self.velocity
+    
+    @async_lock
+    def get_acceleration(self):
+        return self.acceleration
+    
+    @async_lock
+    def get_angular_velocity(self):
+        return self.angular_velocity
+
+    # Set
+    @async_lock
+    def set_pos(self, new_pos):
+        self.pos = np.array(new_pos, dtype=np.float32)
+
+    @async_lock
+    def set_velocity(self, new_velocity):
+        self.velocity = np.array(new_velocity, dtype=np.float32)
+
+    @async_lock
+    def set_acceleration(self, new_acceleration):
+        self.acceleration = np.array(new_acceleration, dtype=np.float32)
+
+    # Add
+    @async_lock
+    def add_pos(self, d_pos):
+        self.pos += np.array(d_pos)
+
+    @async_lock
+    def add_velocity(self, d_velocity):
+        self.velocity += np.array(d_velocity)
+
+    @async_lock
+    def add_acceleration(self, d_acceleration):
+        self.acceleration += np.array(d_acceleration)
+    
+    @async_lock
+    def add_rotation(self, d_rotation):
+        self.rotation += np.array(d_rotation)
+
+    def gravity(self):
+        self.add_acceleration([0, -GRAVITY*0.01, 0])
+
+    @async_lock
+    def drag(self):
+        self.acceleration *= OBJECT_DRAG
+
+    def simulate(self, rigid_bodies_list):
+        start_pos = self.get_pos()
+
+        self.gravity()
+        self.drag()
+        
+        self.add_velocity(self.get_acceleration())
+        self.add_pos(self.get_velocity())
+        self.add_rotation(self.get_angular_velocity())
+
+        end_pos = self.get_pos()
+
+        for rigid_body in rigid_bodies_list:
+            if type(rigid_body) != Cuboid or rigid_body == self: #??
+                continue
+            
+            collision_pos = line_rounded_cuboid_collision(start_pos, end_pos, self.radius, rigid_body.get_pos(), rigid_body.get_size(), rigid_body.get_eulers())
+            
+            if str(collision_pos) != "None":
+                print(collision_pos)
+                self.add_pos([0, self.radius + 1, 0])
+                self.set_acceleration([0, 0, 0])
+                self.set_velocity([0, 0, 0])
+
+    def render(self, model_matrix_handle):
+        pos = self.get_pos()
+
+        self.material.use()
+        
+        model_transform = pyrr.matrix44.create_identity(dtype = np.float32)
+
+        # Scale
+        model_transform = pyrr.matrix44.multiply(
+            m1 = model_transform,
+            m2 = pyrr.matrix44.create_from_scale(self.scale, dtype = np.float32)
+        )
+
+        # Rotate around origin
+        model_transform = pyrr.matrix44.multiply(
+            m1 = model_transform,
+            m2 = pyrr.matrix44.create_from_eulers(self.rotation, dtype = np.float32)
+        )
+
+        # Translate
+        model_transform = pyrr.matrix44.multiply(
+            m1 = model_transform,
+            m2 = pyrr.matrix44.create_from_translation(pos, dtype = np.float32)
+        )
+        
+        # Complete transform
+        gl.glUniformMatrix4fv(model_matrix_handle, 1, gl.GL_FALSE, model_transform)
+        gl.glBindVertexArray(self.mesh.vao)
+        
+        gl.glDrawArrays(gl.GL_TRIANGLES, 0, self.mesh.vertex_count)
+
+    def destroy(self):
+        self.mesh.destroy()
+        self.material.destroy()
+
+
 class Object:
     def __init__(self, mesh_path, material_path, pos = np.zeros(3), rotation = np.zeros(3), scale = np.ones(3)):
         self.pos = np.array(pos, dtype=np.float32)
@@ -299,7 +856,7 @@ class Object:
 
         self.mesh = Mesh(mesh_path)
         self.material = Material(material_path)
-        self.material.use()
+        #self.material.use()
 
     def render(self, model_matrix_handle):
         self.material.use()
@@ -430,6 +987,9 @@ class GraphicsEngine:
         
         for object in scene.get_objects_list():
             object.render(self.model_matrix_handle)
+
+        for rigid_body in scene.get_rigid_bodies_list():
+            rigid_body.render(self.model_matrix_handle)
 
         static_lights = scene.get_static_lights()[:100]
         for i, light in enumerate(static_lights):
@@ -600,6 +1160,7 @@ class Scene():
         self.screen_width, self.screen_height = screen_size
 
         self.lock = threading.Lock()
+        self.player_lock = threading.Lock()
 
         self.running = True
         self.set_player_feet([0, 0, 0])
@@ -641,9 +1202,9 @@ class Scene():
             Light(
                 position = pos,
                 color = [
-                    np.random.uniform(0.0, 1.0),
-                    np.random.uniform(0.0, 1.0),
-                    np.random.uniform(0.0, 1.0),
+                    np.random.uniform(0.2, 1.0),
+                    np.random.uniform(0.2, 1.0),
+                    np.random.uniform(0.2, 1.0),
                 ],
                 strength = 18
             )
@@ -660,6 +1221,14 @@ class Scene():
             #'test': LockedRectCollider([-2, -2, -2], [2, 2, 2], debug=True)
         }
 
+        self.rigid_bodies = {
+            'cube':  Cuboid(GFX_PATH + "wood.jpeg", pos = [9, 1.6, 0], velocity = [0.025, 0, 0], angular_velocity = [0, 0, np.pi / TPS]),
+            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[2, 2, 2], eulers=[np.pi/5, np.pi/5, np.pi/5]),
+            #'cube3': Cuboid(GFX_PATH + "wood.jpeg", pos = [2.2, 1, 0], size=[1, 1, 1]),
+            #'cube4': Cuboid(GFX_PATH + "wood.jpeg", pos = [4.4, 1, 0], size=[1, 1, 1]),
+            'sphere': Sphere(GFX_PATH + "wood.jpeg", pos = [2.5, 6.6234234, 2.12], radius=3)
+        }
+
         stair_count = 8
         for x in range(stair_count):
             self.colliders[f"stair{x}"] = LockedRectCollider([-18.4 - x*0.6, -0.7 + x*0.59, 1.2], [-19 - x*0.6, 0.6 + x*0.59, -1.2], debug=True)
@@ -674,7 +1243,7 @@ class Scene():
             self.player_pos = np.array(new_player_pos, dtype=np.float32)
 
     def get_player_feet(self):
-        pos = self.get_player_pos()
+        pos = self.player_pos
         return pos + np.array([0, -DEFAULT_PLAYER_HEIGHT, 0])
 
     def set_player_feet(self, new_player_feet_pos):
@@ -695,7 +1264,7 @@ class Scene():
             self.player_acceleration += np_add_player_acceleration
 
     def get_player_pos(self):
-        with self.lock:
+        with self.lock and self.player_lock:
             return self.player_pos
         
     def get_player_forwards(self):
@@ -745,6 +1314,10 @@ class Scene():
     def get_colliders_list(self):
         with self.lock:
             return self.colliders.values()
+        
+    def get_rigid_bodies_list(self):
+        with self.lock:
+            return self.rigid_bodies.values()
     
     def get_objects_list(self):
         with self.lock:
@@ -795,9 +1368,9 @@ class Scene():
         # Handle vertical movement (space = up, ctrl = down)
         if FLIGHT_ENABLED:
             if glfw.get_key(self.window, glfw.KEY_SPACE):
-                d_pos[1] = PLAYER_ACCELERATION
+                d_pos[1] = PLAYER_ACCELERATION * speed_multiplier * 8
             elif glfw.get_key(self.window, glfw.KEY_LEFT_CONTROL):
-                d_pos[1] = -PLAYER_ACCELERATION
+                d_pos[1] = -PLAYER_ACCELERATION * speed_multiplier * 8
         else:
             if glfw.get_key(self.window, glfw.KEY_SPACE):
                 if not self.previous_space_state:
@@ -873,6 +1446,12 @@ class Scene():
                 self.set_player_feet([pos[0], collider.top, pos[2]])
                 self.player_acceleration *= np.array([1, 0, 1])
 
+    def rigid_body_collision(self):
+        rigid_bodies = self.get_rigid_bodies_list()
+        
+        for rigid_body in rigid_bodies:
+            rigid_body.simulate(rigid_bodies)
+
     def main(self):
         while self.running:
             start_time = time.perf_counter()
@@ -881,10 +1460,24 @@ class Scene():
             self.handle_keys()
             self.handle_mouse()
 
-            self.gravity()
-            self.move_player()
+            with self.player_lock:
+                self.gravity()
+                self.move_player()
+                self.player_collision()
 
-            self.player_collision()
+            self.rigid_body_collision()
+
+            """
+            self.dynamic_lights = {
+                'player': Light(
+                    position = self.get_player_pos(),
+                    color = [
+                        0.8, 0.6, 0.8
+                    ],
+                    strength = 9
+                )
+            }
+            """
 
             # Tick
             self.fps_monitor.run()
