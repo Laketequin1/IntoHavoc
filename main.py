@@ -20,7 +20,7 @@ import copy
 from src import COLOURS
 
 ### Constants ###
-FLIGHT_ENABLED = False
+FLIGHT_ENABLED = True
 DEBUG = True
 DEBUG_TRANSPARENCY = 0.2
 DEBUG_RECT_MODEL = "debug_rect.obj"
@@ -141,8 +141,8 @@ def async_lock(func):
 def euler_to_rotation_matrix(roll, pitch, yaw): 
     R_x = np.array([
         [1, 0, 0],
-        [0, np.cos(roll), -np.sin(roll)],
-        [0, np.sin(roll), np.cos(roll)]
+        [0, np.cos(yaw), -np.sin(yaw)],
+        [0, np.sin(yaw), np.cos(yaw)]
     ])
     R_y = np.array([
         [np.cos(pitch), 0, np.sin(pitch)],
@@ -150,8 +150,8 @@ def euler_to_rotation_matrix(roll, pitch, yaw):
         [-np.sin(pitch), 0, np.cos(pitch)]
     ])
     R_z = np.array([
-        [np.cos(yaw), -np.sin(yaw), 0],
-        [np.sin(yaw), np.cos(yaw), 0],
+        [np.cos(roll), -np.sin(roll), 0],
+        [np.sin(roll), np.cos(roll), 0],
         [0, 0, 1]
     ])
     
@@ -249,6 +249,7 @@ def line_sphere_intersection(p1, p2, sphere_center, radius):
     intersection_point = p1 + t * line_dir
     return intersection_point
 
+"""
 def line_cuboid_intersection(ray_start, ray_finish, cuboid_center, cuboid_size):
     width, height, depth = cuboid_size
 
@@ -302,56 +303,9 @@ def line_cuboid_collision(p1, p2, cuboid_center, cuboid_size, euler_angles):
     collision = line_cuboid_intersection(p1_local, p2_local, (0, 0, 0), cuboid_size)
 
     return collision
-
-"""
-def line_cuboid_collision(p1, p2, cuboid_center, cuboid_size, euler_angles):
-    # Unpack cuboid properties
-    cx, cy, cz = cuboid_center
-    w, h, d = cuboid_size
-    roll, pitch, yaw = euler_angles
-
-    # Convert Euler angles to rotation matrix
-    R = euler_to_rotation_matrix(roll, pitch, yaw)
-    R_inv = R.T  # Inverse of rotation matrix is its transpose
-
-    # Transform line segment to cuboid's local space
-    p1_local = R_inv @ (np.array(p1) - np.array([cx, cy, cz]))
-    p2_local = R_inv @ (np.array(p2) - np.array([cx, cy, cz]))
-
-    # Axis-aligned bounds in local space
-    bounds = [
-        (-w / 2, w / 2),  # x-bounds
-        (-h / 2, h / 2),  # y-bounds
-        (-d / 2, d / 2)   # z-bounds
-    ]
-
-    # Slab method in local space
-    t_entry = 0
-    t_exit = 1
-    for i in range(3):  # Iterate over x, y, z axes
-        p1_axis = p1_local[i]
-        p2_axis = p2_local[i]
-        min_bound, max_bound = bounds[i]
-        
-        direction = p2_axis - p1_axis
-        if abs(direction) < 1e-8:  # Line is parallel to the axis
-            if p1_axis < min_bound or p1_axis > max_bound:
-                return None  # No collision
-            continue
-        
-        t_min = (min_bound - p1_axis) / direction
-        t_max = (max_bound - p1_axis) / direction
-        if t_min > t_max:  # Normalize
-            t_min, t_max = t_max, t_min
-        
-        t_entry = max(t_entry, t_min)
-        t_exit = min(t_exit, t_max)
-        
-        if t_entry > t_exit:
-            return None  # No collision
 """
 
-def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, euler_angles):
+def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, euler_angles, col):
     extended_cuboid_size = cuboid_size + radius * 2
 
     p1 = np.array(p1)
@@ -364,12 +318,17 @@ def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, eu
 
     # Convert Euler angles to rotation matrix
     rotation_matrix = euler_to_rotation_matrix(roll, pitch, yaw)
-    print(rotation_matrix)
     R_inv = np.transpose(rotation_matrix)  # Inverse of rotation matrix is its transpose
     
     # Transform line segment to cuboid's local space
     p1_local = R_inv @ (p1 - np.array([cx, cy, cz]))
     p2_local = R_inv @ (p2 - np.array([cx, cy, cz]))
+
+    pt = copy.deepcopy(np.array([cx, cy, cz]) + np.array([3, 5, 0]))
+
+    pt_local = R_inv @ (pt - np.array([cx, cy, cz]))
+
+    pt_local[1] += 10
 
     print("\n\n###")
     print(p1_local, p2_local)
@@ -381,6 +340,17 @@ def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, eu
         (-h / 2, h / 2),  # y-bounds
         (-d / 2, d / 2)   # z-bounds
     ]
+
+    col["1"].set_corners(np.array([-w / 2, -h / 2 + 10, -d / 2]), np.array([w / 2, h / 2 + 10, d / 2]))
+
+    p1ah = copy.deepcopy(p1_local)
+    p1ah[1] += 10
+
+    p2ah = copy.deepcopy(p2_local)
+    p2ah[1] += 10
+
+    col["2"].set_corners(pt_local - 0.2, pt_local + 0.2)
+    #col["2"].set_corners(p1ah - 0.2, p2ah + 0.2)
     
     # Slab method in local space
     t_entry = 0
@@ -603,6 +573,24 @@ class LockedRectCollider: # Create parent class for future colliders
         if self.debug:
             self.mesh = Mesh(MODELS_PATH + DEBUG_RECT_MODEL)
 
+    def set_corners(self, corner1, corner2):
+        self.top = max(corner1[1], corner2[1])
+        self.bottom = min(corner1[1], corner2[1])
+
+        self.right = max(corner1[0], corner2[0])
+        self.left = min(corner1[0], corner2[0])
+
+        self.back = max(corner1[2], corner2[2])
+        self.front = min(corner1[2], corner2[2])
+
+        self.pos = [(self.right + self.left) / 2, (self.top + self.bottom) / 2, (self.back + self.front) / 2]
+
+        self.height = abs(self.top - self.bottom) / 2
+        self.width = abs(self.right - self.left) / 2
+        self.depth = abs(self.back - self.front) / 2
+
+        self.scale = [self.width, self.height, self.depth]
+
     def render(self, model_matrix_handle, color_handle):
         if self.debug:
             gl.glUniform4fv(color_handle, 1, self.debug_color)
@@ -723,13 +711,14 @@ class Cuboid:
 
 
 class Sphere:
-    def __init__(self, material_path, eulers = np.zeros(3, dtype=np.float32), angular_velocity = np.zeros(3, dtype=np.float32), mass = 1, pos = np.zeros(3, dtype=np.float32), velocity = np.zeros(3, dtype=np.float32), radius = 0.5):
+    def __init__(self, material_path, eulers = np.zeros(3, dtype=np.float32), angular_velocity = np.zeros(3, dtype=np.float32), mass = 1, pos = np.zeros(3, dtype=np.float32), velocity = np.zeros(3, dtype=np.float32), radius = 0.5, col = None):
         self.rotation = np.array(eulers, dtype=np.float32)
         self.angular_velocity = np.array(angular_velocity, dtype=np.float32)
         self.mass = mass
         self.pos = np.array(pos, dtype=np.float32)
         self.velocity = np.array(velocity, dtype=np.float32)
         self.radius = radius
+        self.col = col
 
         self.acceleration = np.zeros(3)
         self.scale = np.array([radius * 2, radius * 2, radius * 2]) / 2 # Mesh is 2x2x2
@@ -816,13 +805,18 @@ class Sphere:
             if type(rigid_body) != Cuboid or rigid_body == self: #??
                 continue
             
-            collision_pos = line_rounded_cuboid_collision(start_pos, end_pos, self.radius, rigid_body.get_pos(), rigid_body.get_size(), rigid_body.get_eulers())
+            with self.lock:
+                pos_at_collision = line_rounded_cuboid_collision(start_pos, end_pos, self.radius, rigid_body.get_pos(), rigid_body.get_size(), rigid_body.get_eulers(), self.col)
             
-            if str(collision_pos) != "None":
-                print(collision_pos)
-                self.add_pos([0, self.radius + 1, 0])
+            if str(pos_at_collision) != "None":
+                print(pos_at_collision)
+                with self.lock:
+                    self.col["collision"].set_corners(pos_at_collision-0.1, pos_at_collision+0.1)
+                self.add_pos([0, self.radius + 4.5, 0])
                 self.set_acceleration([0, 0, 0])
                 self.set_velocity([0, 0, 0])
+            
+            break
 
     def render(self, model_matrix_handle):
         pos = self.get_pos()
@@ -1229,16 +1223,32 @@ class Scene():
         self.colliders = {
             'ground': LockedRectCollider([-100.01, -2, -100.01], [100.01, 0.01, 100.01], debug=True),
             'platform': LockedRectCollider([-23, 4.4, -7], [-37, 4.8, 6.5], debug=True),
+            'x': LockedRectCollider([9.5, -0.5, -0.5], [10.5, 0.5, 0.5], debug=True),
+            #'y': LockedRectCollider([-0.5, 9.5, -0.5], [0.5, 10.5, 0.5], debug=True),
+            'z': LockedRectCollider([-0.5, -0.5, 9.5], [0.5, 0.5, 10.5], debug=True),
+            'collision': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '1': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '2': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '3': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '4': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '5': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '6': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '7': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+            '8': LockedRectCollider([-0.5, -9.5, -0.5], [0.5, -9.6, 0.5], debug=True),
+
             #'stair1': LockedRectCollider([-18.4, -0.1, 1.2], [-19, 0.6, -1.2], debug=True),
             #'test': LockedRectCollider([-2, -2, -2], [2, 2, 2], debug=True)
         }
 
         self.rigid_bodies = {
-            'cube':  Cuboid(GFX_PATH + "wood.jpeg", pos = [9, 1.6, 0], velocity = [0.025, 0, 0], angular_velocity = [0, np.pi / TPS, 0]),
-            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[2, 1, 4], eulers=[0, -np.pi / 2, 0]),
+            #'cube':  Cuboid(GFX_PATH + "wood.jpeg", pos = [9, 1.6, 0], velocity = [0.025, 0.05, 0], size=[6, 1, 6], angular_velocity = [0, np.pi / TPS, 0]),
+            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[10, 2, 10], eulers=[np.pi / TPS, np.pi / TPS, np.pi / TPS]),#, angular_velocity = [np.pi / TPS, np.pi / TPS, np.pi / TPS]), #np.pi / 2, -np.pi / 2
             #'cube3': Cuboid(GFX_PATH + "wood.jpeg", pos = [2.2, 1, 0], size=[1, 1, 1]),
             #'cube4': Cuboid(GFX_PATH + "wood.jpeg", pos = [4.4, 1, 0], size=[1, 1, 1]),
-            'sphere': Sphere(GFX_PATH + "wood.jpeg", pos = [3.2, 7, 1.5], radius=2)
+            'sphere': Sphere(GFX_PATH + "wood.jpeg", pos = [0, 9, -3], radius=0.4, col = self.colliders),
+            'x': Cuboid(GFX_PATH + "wood.jpeg", pos = [10, 0, 0], size=[0.5, 0.5, 0.5], angular_velocity = [np.pi / TPS, 0, 0]),
+            #'y': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, 10, 0], size=[0.5, 0.5, 0.5], angular_velocity = [0, np.pi / TPS, 0]),
+            'z': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, 0, 10], size=[0.5, 0.5, 0.5], angular_velocity = [0, 0, np.pi / TPS]),
         }
 
         stair_count = 8
