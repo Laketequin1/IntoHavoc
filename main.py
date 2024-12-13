@@ -24,6 +24,7 @@ FLIGHT_ENABLED = False
 DEBUG = True
 DEBUG_TRANSPARENCY = 0.2
 DEBUG_RECT_MODEL = "debug_rect.obj"
+PRINT_FRAME_RATE = False
 
 TPS = 60
 FPS_CAP = 1 if not DEBUG else 0 # Set to 0 for uncapped FPS, 1 for VSYNC, 2+ for CAP
@@ -79,7 +80,7 @@ atexit.register(exit_handler)
 ### DEBUGGING ###
 class FrameRateMonitor:
     def __init__(self, name=""):
-        if not DEBUG:
+        if not PRINT_FRAME_RATE:
             return
         
         self.frame_times = []
@@ -89,7 +90,7 @@ class FrameRateMonitor:
         self.total_elapsed = 0
 
     def print_fps(self):
-        if not DEBUG:
+        if not PRINT_FRAME_RATE:
             return
         
         if len(self.frame_times) and self.total_elapsed:
@@ -101,7 +102,7 @@ class FrameRateMonitor:
         self.total_elapsed = 0
 
     def run(self):
-        if not DEBUG:
+        if not PRINT_FRAME_RATE:
             return
 
         current_time = time.time()
@@ -137,7 +138,7 @@ def async_lock(func):
             return copy.deepcopy(func(self, *args, **kwargs))
     return wrapper
 
-def euler_to_rotation_matrix(roll, pitch, yaw):
+def euler_to_rotation_matrix(roll, pitch, yaw): 
     R_x = np.array([
         [1, 0, 0],
         [0, np.cos(roll), -np.sin(roll)],
@@ -192,7 +193,7 @@ def line_circle_intersection(p1, p2, circle_center, radius):
 
     print(t)
 
-    if t < 0 or t > 1 or t is np.nan:
+    if t < -1 or t > 1 or t is np.nan:
         return None
     
     # Calculate the intersection point
@@ -240,7 +241,7 @@ def line_sphere_intersection(p1, p2, sphere_center, radius):
 
     print(f"T: {t}")
     
-    if t < 0 or t > 1 or t is np.nan:
+    if t < -1 or t > 1 or t is np.nan:
         # The line does not intersect the sphere in the positive direction
         return None
     
@@ -353,19 +354,27 @@ def line_cuboid_collision(p1, p2, cuboid_center, cuboid_size, euler_angles):
 def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, euler_angles):
     extended_cuboid_size = cuboid_size + radius * 2
 
+    p1 = np.array(p1)
+    p2 = np.array(p2)
+
     # Unpack cuboid properties
     cx, cy, cz = cuboid_center
     w, h, d = extended_cuboid_size
     roll, pitch, yaw = euler_angles
 
     # Convert Euler angles to rotation matrix
-    R = euler_to_rotation_matrix(roll, pitch, yaw)
-    R_inv = R.T  # Inverse of rotation matrix is its transpose
+    rotation_matrix = euler_to_rotation_matrix(roll, pitch, yaw)
+    print(rotation_matrix)
+    R_inv = np.transpose(rotation_matrix)  # Inverse of rotation matrix is its transpose
     
     # Transform line segment to cuboid's local space
-    p1_local = R_inv @ (np.array(p1) - np.array([cx, cy, cz]))
-    p2_local = R_inv @ (np.array(p2) - np.array([cx, cy, cz]))
-    
+    p1_local = R_inv @ (p1 - np.array([cx, cy, cz]))
+    p2_local = R_inv @ (p2 - np.array([cx, cy, cz]))
+
+    print("\n\n###")
+    print(p1_local, p2_local)
+    print(p1, p2, radius, cuboid_center, cuboid_size, euler_angles)
+
     # Axis-aligned bounds in local space
     bounds = [
         (-w / 2, w / 2),  # x-bounds
@@ -439,7 +448,7 @@ def line_rounded_cuboid_collision(p1, p2, radius, cuboid_center, cuboid_size, eu
     # else: just don't worry about it
     
     # Transform collision point back to world space
-    collision_world = R @ collision_local + np.array([cx, cy, cz])
+    collision_world = rotation_matrix @ collision_local + np.array([cx, cy, cz])
     return collision_world
 
 
@@ -670,6 +679,9 @@ class Cuboid:
     def add_pos(self, d_pos):
         self.pos += np.array(d_pos)
 
+    def get_relative_eulers(self):
+        return np.array([self.eulers[0], self.eulers[2], self.eulers[1]], dtype=np.float32)
+
     def simulate(self, _rigid_bodies_list):
         self.add_pos(self.get_velocity())
         self.add_angular_velocity(self.get_angular_velocity())
@@ -690,7 +702,7 @@ class Cuboid:
         # Rotate around origin
         model_transform = pyrr.matrix44.multiply(
             m1 = model_transform,
-            m2 = pyrr.matrix44.create_from_eulers(self.eulers, dtype = np.float32)
+            m2 = pyrr.matrix44.create_from_eulers(self.get_relative_eulers(), dtype = np.float32)
         )
 
         # Translate
@@ -1222,11 +1234,11 @@ class Scene():
         }
 
         self.rigid_bodies = {
-            'cube':  Cuboid(GFX_PATH + "wood.jpeg", pos = [9, 1.6, 0], velocity = [0.025, 0, 0], angular_velocity = [0, 0, np.pi / TPS]),
-            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[2, 2, 3.5], eulers=[np.pi/5, np.pi/5, np.pi/5]),
+            'cube':  Cuboid(GFX_PATH + "wood.jpeg", pos = [9, 1.6, 0], velocity = [0.025, 0, 0], angular_velocity = [0, np.pi / TPS, 0]),
+            'cube2': Cuboid(GFX_PATH + "wood.jpeg", pos = [0, DEFAULT_PLAYER_HEIGHT - 1, 0], size=[2, 1, 4], eulers=[0, -np.pi / 2, 0]),
             #'cube3': Cuboid(GFX_PATH + "wood.jpeg", pos = [2.2, 1, 0], size=[1, 1, 1]),
             #'cube4': Cuboid(GFX_PATH + "wood.jpeg", pos = [4.4, 1, 0], size=[1, 1, 1]),
-            'sphere': Sphere(GFX_PATH + "wood.jpeg", pos = [2.5, 6.6234234, 2.12], radius=3)
+            'sphere': Sphere(GFX_PATH + "wood.jpeg", pos = [3.2, 7, 1.5], radius=2)
         }
 
         stair_count = 8
