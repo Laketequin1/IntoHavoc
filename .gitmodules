@@ -1,0 +1,3 @@
+[submodule "LakeGraphicsFramework"]
+	path = LakeGraphicsFramework
+	url = git@github.com:Laketequin1/IntoHavoc
