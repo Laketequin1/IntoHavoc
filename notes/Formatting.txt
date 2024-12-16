@@ -1,0 +1,190 @@
+[WORK ON ONE CLASS AT TIME. USE OTHER MODULES TO STREAMLINE]
+
+@WRAPPER FOR public functions, may need lock BUT NOT ALL?
+@WRAPPER FOR _private functions which says NUH UH if wrong thread or something (warn) [Also, lock]
+
+Settings.json
+# Replace most constants with Settings['etc'] - not GLOBAL_UP though
+
+Profiler:
+verbose = {
+    NONE = 0,    # No info, warnings, or errors
+    ERROR = 1,   # Only errors
+    WARNING = 2, # Warnings and errors
+    INFO = 3     # Info, warnings, and errors
+		 # ETC
+}
+get_verbose()
+set_verbose()
+info()
+warn()
+error()
+
+--------------------
+Window(*Relevant_Settings):
+[init]
+GraphicsEngine
+
+[init funcs]
+_init_glfw
+
+[private]
+_handle_window_events()
+_update_cursor()
+_tick() # poll_events(), set mouse pos var, TRACK FPS, _handle_window_events, NOT GraphicsEngine Update # COMPLETE QUEUED ACTIONS
+_check_gl_error()
+_safe_update(): graphics_engine._update() # Handle new shaders
+_render()
+_close()
+_main()
+
+[public]
+get_cursor_pos() -> (x, y)
+get_fps() -> int
+get_fps_cap() -> int
+set_cursor_pos(cursor_pos) # QUEUE NEXT FRAME
+set_fps_cap(fps_cap)  	   # QUEUE NEXT FRAME
+center_cursor() 	   # QUEUE NEXT FRAME
+save_screenshot(filepath)  # QUEUE NEXT FRAME
+close()                    # QUEUE NEXT FRAME
+
+[main]
+while running:
+  with self.lock:
+    gl.glFlush() # Wait for pipeline
+    _safe_update()
+    _render()
+    _gl_check_error()
+
+  _tick()
+_close()
+
+--------------------
+GraphicsEngine(*Relevant_Settings, compile_time_config: {'max_lights': 100}):
+[init]
+_create_shader(compile_time_config: {'max_lights': 100})
+_setup_shader_handles(shader)
+pending_draw_list = []
+live_draw_list = []
+
+[private]
+_update() # BEFORE RENDER (Handle new shaders)
+_render() # renders draw list
+_model_transform(model_transform, scale, rotation, pos) -> new_model_transform
+_render_objects(objs) # renders draw list IN ORDER
+_render_lights(lights) # renders draw list IN ORDER
+
+[public]
+clear() # clears pending draw list
+#set_background_colour(colour) # Maybe?
+set_view(pos, rotation) # Sets view pos 
+create_shader(shader_path, compile_time_config=None) -> shader_id # QUEUE NEXT FRAME
+use_shader(shader_id) # set shader in draw list
+draw(object(s)) # adds COPY of object to pending draw list
+update() # update draw list
+
+[classes]
+ - Object(mesh, texture, expected_shader, base_colour=None): # Throw warning if not expected shader
+      [init]
+      etc
+      [public]
+      render()
+      destroy()
+ - Light:
+      render()
+
+ - _Mesh
+ - _Texture
+ - _Shader
+
+--------------------
+PhysicsEngine(*Relevant_Settings):
+ - Object(mass, center_pos, rotation: ??? TODO, velocity, angular_velocity)
+    [public]
+    step(time) -> new_pos, new_rotation # DELTATIME?
+    step_collision(time, objs) -> new_pos, new_rotation
+    add_velocity()
+    add_...()
+ - Sphere:Object(..., radius)
+ - Cuboid:Object(..., size)
+
+lazy_collision_check(obj1, obj2) -> ???? TODO
+continuous_collision_check(obj1, obj2) -> ???? TODO
+
+--------------------
+Object(name, GraphicsEngine.Object, some PhysicsEngine.Object)
+[public]
+update()
+display()
+
+--------------------
+Player:Object(...)
+feet_pos
+head_pos
+
+[private]
+_update_forwards()
+
+[public]
+collision()
+spin()
+
+
+--------------------
+World: # Gameplay
+[init]
+objects = [Object, ...]
+static_lights = [Light, ...]
+[public]
+update
+draw_objects
+
+
+--------------------
+Client(World): # Don't worry about the internet part, yet (No need to worry about threading)
+player = Player
+prev_pressed_keys = []
+
+[private]
+_handle_keys()
+_handle_mouse()
+_render() # GraphicsEngine clear, set_view, use_shader, world.draw_objects, update
+_tick() # Best tick function?
+_destroy()
+
+[main]
+while running:
+  _handle_keys()
+  _handle_mouse()
+  world.update()
+
+  world.render_objects()
+  
+  _tick()
+_destroy()
+
+--------------------
+Server: #Later ;D
+
+
+--------------------
+[ENRTY POINT]
+
+# imports
+# constants
+# thread handling
+
+Settings = get_settings()
+
+if __name__ == "__main__":
+  window = Window()
+  world = World()
+  client = Client(world)
+  
+  client_thread = threading.Thread(target=client.main)
+  client_thread.start()
+
+  window.main()
+ 
+  client_thread.join()
+  sys.exit(0)
