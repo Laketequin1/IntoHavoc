@@ -19,6 +19,7 @@ set_verbose()
 info()
 warn()
 error()
+_save()
 
 --------------------
 Window(*Relevant_Settings):
@@ -47,6 +48,7 @@ set_fps_cap(fps_cap)  	   # QUEUE NEXT FRAME
 center_cursor() 	   # QUEUE NEXT FRAME
 save_screenshot(filepath)  # QUEUE NEXT FRAME
 close()                    # QUEUE NEXT FRAME
+get_gl_errors()
 
 [main]
 while running:
@@ -66,6 +68,8 @@ _create_shader(compile_time_config: {'max_lights': 100})
 _setup_shader_handles(shader)
 pending_draw_list = []
 live_draw_list = []
+
+(Insteat make create shader seperate)
 
 [private]
 _update() # BEFORE RENDER (Handle new shaders)
