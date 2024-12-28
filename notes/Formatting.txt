@@ -62,14 +62,12 @@ while running:
 _close()
 
 --------------------
-GraphicsEngine(*Relevant_Settings, compile_time_config: {'max_lights': 100}):
+GraphicsEngine(*Relevant_Settings):
 [init]
-_create_shader(compile_time_config: {'max_lights': 100})
-_setup_shader_handles(shader)
 pending_draw_list = []
 live_draw_list = []
 
-(Insteat make create shader seperate)
+(Instead make create shader seperate)
 
 [private]
 _update() # BEFORE RENDER (Handle new shaders)
@@ -78,11 +76,17 @@ _model_transform(model_transform, scale, rotation, pos) -> new_model_transform
 _render_objects(objs) # renders draw list IN ORDER
 _render_lights(lights) # renders draw list IN ORDER
 
+_create_shader(compile_time_config: {'max_lights': 100})
+_setup_shader_handles(shader)
+
 [public]
+# Creating
+create_shader(shader_path, compile_time_config=None: {'max_lights': 100}) -> shader_id # QUEUE NEXT FRAME
+
+# Drawing
 clear() # clears pending draw list
-#set_background_colour(colour) # Maybe?
 set_view(pos, rotation) # Sets view pos 
-create_shader(shader_path, compile_time_config=None) -> shader_id # QUEUE NEXT FRAME
+set_background_colour(colour)
 use_shader(shader_id) # set shader in draw list
 draw(object(s)) # adds COPY of object to pending draw list
 update() # update draw list
