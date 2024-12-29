@@ -62,7 +62,7 @@ while running:
 _close()
 
 --------------------
-GraphicsEngine(*Relevant_Settings):
+GraphicsEngine(*Relevant_Settings, aspect, background_colour):
 [init]
 pending_draw_list = []
 live_draw_list = []
@@ -81,7 +81,8 @@ _setup_shader_handles(shader)
 
 [public]
 # Creating
-create_shader(shader_path, compile_time_config=None: {'max_lights': 100}) -> shader_id # QUEUE NEXT FRAME
+create_shader(shader_path, texture_name=None: str, projection_name: str... , custom_names: list or dict?, compile_time_config=None: {'max_lights': 100}) -> shader_id # QUEUE NEXT FRAME
+#something for texture too?
 
 # Drawing
 clear() # clears pending draw list
