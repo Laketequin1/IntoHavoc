@@ -64,8 +64,9 @@ _close()
 --------------------
 GraphicsEngine(*Relevant_Settings, aspect, background_colour):
 [init]
+# setup default shader
 pending_draw_list = []
-live_draw_list = []
+active_draw_list = []
 
 (Instead make create shader seperate)
 
