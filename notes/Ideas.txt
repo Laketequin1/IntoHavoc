@@ -15,3 +15,4 @@ Infection levels:
 4 - When looking away and back towards a player, they look like a zombie. When shot, glitches back to normal player.
 6 - Turn into a zombie? Run out of bullets, have to meele/knife only, but you're actually killing your team mates who look like zombies. On others screen, looks like you're biting them
 
+Animate the mouse cursor while loading

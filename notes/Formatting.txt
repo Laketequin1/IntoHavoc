@@ -87,7 +87,9 @@ create_shader(shader_path, texture_name=None: str, projection_name: str... , cus
 
 # Drawing
 clear() # clears pending draw list
-set_view(pos, rotation) # Sets view pos 
+set_current_view(pos, rotation) # Sets view pos of current shader
+set_global_view(pos, rotation) # Sets view pos of all shaders
+set_views(shader_ids, pos, rotation) # Sets view pos of all given shaders
 set_background_colour(colour)
 use_shader(shader_id) # set shader in draw list
 draw(object(s)) # adds COPY of object to pending draw list
@@ -99,7 +101,7 @@ update() # update draw list
       etc
       [public]
       render()
-      destroy()
+      destroy() # __del__()??
  - Light:
       render()
 
@@ -128,7 +130,12 @@ update()
 display()
 
 --------------------
-Player:Object(...)
+Entity:Object(...)
+move
+collision
+etc
+
+Player:Entity(...)
 feet_pos
 head_pos
 
@@ -160,7 +167,7 @@ _handle_keys()
 _handle_mouse()
 _render() # GraphicsEngine clear, set_view, use_shader, world.draw_objects, update
 _tick() # Best tick function?
-_destroy()
+_destroy() # __del__(self)??
 
 [main]
 while running:
@@ -171,7 +178,7 @@ while running:
   world.render_objects()
   
   _tick()
-_destroy()
+_destroy() # __del__(self)??
 
 --------------------
 Server: #Later ;D
