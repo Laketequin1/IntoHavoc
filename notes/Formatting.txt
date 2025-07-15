@@ -96,7 +96,7 @@ draw(object(s)) # adds COPY of object to pending draw list
 update() # update draw list
 
 [classes]
- - Object(mesh, texture, expected_shader, base_colour=None): # Throw warning if not expected shader
+ - Object(mesh, texture, expected_shader, base_colour=None): # Throw warning if not expected shaderx
       [init]
       etc
       [public]

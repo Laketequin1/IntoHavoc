@@ -1,0 +1,38 @@
+End-User Basic Program:
+    import graphics, physics
+
+    create scene(s) [Hirachy of cameras and objects - E.g. Main Menu, Level 1, Level 2] [MUST allow for interpolation]
+    create window(s)
+
+    create camera [Not in scene. Seperate, so same camera can be used over multiple scenes] [Default shader] [Interpolation settings, or snap]
+    create shader
+    camera.apply_shader(shader) [Can be reverted with camera.default_shader()]
+
+    geometry = BoxGeometry((1, 1, 1))     <-     inherit from BaseObject3D
+    material = MeshBasicMaterial({"color": (200, 150, 150)})
+    cube = Mesh(geometry, material)
+    cube.move((1, 0, 0)) [Moves cube relative to default position. All transformations must be rememebered for children]
+    scene.add(cube) [Cube 1 unit above origin. Also give the cube a UUID - Possibly important for later!]
+
+    object = EmptyObject()
+    scene.add(object) [Same as cube, but no mesh - however things can be added under it]
+
+    geometry = SphereGeometry( some settings )
+    sphere = Mesh(geometry, material) [Re-using and sharing material from eariler]
+    sphere.set_name("Boo!")
+    sphere.set_interpolation_method(None) [Don't interpolate for this sphere only]
+    cube.add(sphere) [child of cube, inherit transformations. For simplicity, can't make it *not* follow transformations]
+    sphere.move((1, 0, 0)) [Moves cube relative parent cube]
+
+    material.set_color((100, 100, 100)) [Update color for both cube and sphere]
+
+    sphere.get_parent().move((1, 0, 0)) [Move cube]
+    cube.get_children()[0].get_name() -> Gets "Boo!" from the object
+
+    cube.delete() [Delete self and children from scene]
+
+    window.clear()
+    window.render(scene, camera)
+    window.render(scene2, camera2) [Could have "transparent" background - such as for UI]
+    window.update() [Better naming conventions?]
+
