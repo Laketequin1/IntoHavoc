@@ -1,3 +1,24 @@
+app/
+    main.py
+
+    lake_graphics_framework/ # Snake case is the official style
+        __init__.py # Makes "lake_graphics_framework" a python package
+        requirements.txt
+        README.md
+
+        graphics/
+        mesh.py
+        shader.py
+        camera.py
+        
+        utils/
+            __init__.py # !!!
+            extras.py
+
+etc...
+        
+
+
 End-User Basic Program:
     import graphics, physics
 
