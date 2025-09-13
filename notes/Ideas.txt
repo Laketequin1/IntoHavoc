@@ -7,12 +7,14 @@ HUD with seperate shader? Highlight player and enemys, maybe health popups??
 When grabbed by zombie, fastest way to get off is another player shooting it
 Other players have high health
 
+In game proxy voice chat.
+
 Infection levels:
 0 - None
 1 - Noises
 2 - Fake zombies only client can see, not real dissapear on shot or grab
 3 - Fake invincible zombies on client only, grab player for 3 seconds (no damage or infection). Other players see struggle with no zombies
-4 - When looking away and back towards a player, they look like a zombie. When shot, glitches back to normal player.
-6 - Turn into a zombie? Run out of bullets, have to meele/knife only, but you're actually killing your team mates who look like zombies. On others screen, looks like you're biting them
+4 - When looking away and back towards a player, they look a lot like a zombie. When shot, glitches back to normal player. Voice chat starts becoming muted, and losing direction.
+6 - Turn into a zombie? Run out of bullets, have to meele/knife only, but you're actually killing your team mates who look like zombies. Vague voice chat, and directionless audio. On others screen, looks like you're biting them.
 
 Animate the mouse cursor while loading
