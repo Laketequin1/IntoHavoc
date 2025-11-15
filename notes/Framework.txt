@@ -16,7 +16,7 @@ app/
             extras.py
 
 etc...
-        
+
 
 
 End-User Basic Program:
@@ -25,7 +25,7 @@ End-User Basic Program:
     create scene(s) [Hirachy of cameras and objects - E.g. Main Menu, Level 1, Level 2] [MUST allow for interpolation]
     create window(s)
 
-    create camera [Not in scene. Seperate, so same camera can be used over multiple scenes] [Default shader] [Interpolation settings, or snap]
+    create camera.perspective(fov, aspect, near, far) [Not in scene. Seperate, so same camera can be used over multiple scenes] [Default shader] [Interpolation settings, or snap]
     create shader
     camera.apply_shader(shader) [Can be reverted with camera.default_shader()]
 
@@ -36,24 +36,34 @@ End-User Basic Program:
     scene.add(cube) [Cube 1 unit above origin. Also give the cube a UUID - Possibly important for later!]
 
     object = EmptyObject()
-    scene.add(object) [Same as cube, but no mesh - however things can be added under it]
+    scene.add(object) [Same as cube, but no mesh - however things can be added under it as children, where moving the object moves the children]
 
     geometry = SphereGeometry( some settings )
     sphere = Mesh(geometry, material) [Re-using and sharing material from eariler]
     sphere.set_name("Boo!")
     sphere.set_interpolation_method(None) [Don't interpolate for this sphere only]
-    cube.add(sphere) [child of cube, inherit transformations. For simplicity, can't make it *not* follow transformations]
+    cube.add(sphere) [child of cube, inherit transformations, past and future. Add option instead lock pos/rotation in world axis. By default adds sphere to center of parent.]
     sphere.move((1, 0, 0)) [Moves cube relative parent cube]
 
     material.set_color((100, 100, 100)) [Update color for both cube and sphere]
 
-    sphere.get_parent().move((1, 0, 0)) [Move cube]
+    sphere.get_parent().move((1, 0, 0)) [Move cube, and thus sphere]
     cube.get_children()[0].get_name() -> Gets "Boo!" from the object
 
+    cube.hide() [Hide self and children from scene]
+    cube.show() [Show self and children from scene]
+    cube.hide_children() [Hide children from scene]
+    cube.show_children() [Show children from scene]
+    cube.hide_self() [Hide self from scene, keep children unchanged]
+    cube.hide_self() [Show self from scene, keep children unchanged]
     cube.delete() [Delete self and children from scene]
 
-    window.clear()
+    camera.look_at(object)
+
+    window.set_viewport(0, 0, SCREEN_WIDTH / 2, SCREEN_HEIGHT) ?????
+    window.set_clear_color(color)
+    window.clear([color optional])
     window.render(scene, camera)
-    window.render(scene2, camera2) [Could have "transparent" background - such as for UI]
+    window.render(scene2, camera2) [Could have "transparent" background - such as for UI such that scene2 UI appears over scene]
     window.update() [Better naming conventions?]
 
